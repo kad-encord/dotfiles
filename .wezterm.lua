@@ -22,14 +22,14 @@ local function load_theme()
 		pref_f:close()
 		-- Apply theme based on preference
 		if theme == "dark" then
-			config.color_scheme = "Everforest Dark Soft (Gogh)"
+			config.color_scheme = "Everforest Dark (Gogh)"
 		else
-			config.color_scheme = "Everforest Light Soft (Gogh)"
+			config.color_scheme = "Everforest Light (Gogh)"
 		end
 		return config
 	end
 	-- Final fallback to light theme
-	config.color_scheme = "Everforest Light Soft (Gogh)"
+	config.color_scheme = "Everforest Light (Gogh)"
 	return config
 end
 -- Apply the dynamic theme
