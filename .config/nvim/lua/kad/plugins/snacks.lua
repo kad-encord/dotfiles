@@ -94,6 +94,13 @@ return {
 			desc = "Find Config File",
 		},
 		{
+			"<leader>sD",
+			function()
+				Snacks.picker.files({ cwd = "/Users/kad/dotfiles" })
+			end,
+			desc = "Find Dotfiles",
+		},
+		{
 			"<leader>sf",
 			function()
 				Snacks.picker.files()
@@ -172,7 +179,7 @@ return {
 			desc = "Diagnostics",
 		},
 		{
-			"<leader>sD",
+			"<leader>sB",
 			function()
 				Snacks.picker.diagnostics_buffer()
 			end,
