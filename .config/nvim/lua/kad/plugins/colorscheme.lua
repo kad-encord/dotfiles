@@ -33,17 +33,30 @@ set -g status-left '#[fg=#8da101, bg=#f3efdf] #S #[default]'
 ]]
 
 	-- Write WezTerm theme files (Everforest colors)
-
-
-return apply_theme
-]]
+	-- local wezterm_dark_config = [[
+	-- local function apply_theme(config)
+	-- 	config.color_scheme = "EverforestDark"
+	-- 	return config
+	-- end
+	-- 
+	-- return apply_theme
+	-- ]]
+	-- 
+	-- local wezterm_light_config = [[
+	-- local function apply_theme(config)
+	-- 	config.color_scheme = "EverforestLight"
+	-- 	return config
+	-- end
+	-- 
+	-- return apply_theme
+	-- ]]
 
 	-- Write all files
 	local files = {
 		[tmux_dark_theme] = dark_tmux_config,
 		[tmux_light_theme] = light_tmux_config,
-		[wezterm_dir .. "/wezterm_dark.lua"] = wezterm_dark_config,
-		[wezterm_dir .. "/wezterm_light.lua"] = wezterm_light_config,
+		-- [wezterm_dir .. "/wezterm_dark.lua"] = wezterm_dark_config,
+		-- [wezterm_dir .. "/wezterm_light.lua"] = wezterm_light_config,
 	}
 
 	for filepath, content in pairs(files) do
@@ -58,7 +71,7 @@ end
 -- Save current theme preference and update WezTerm
 local function save_theme_preference(background)
 	local config_dir = vim.fn.stdpath("config")
-	local wezterm_dir = vim.fn.expand("$HOME/.config/wezterm")
+	-- local wezterm_dir = vim.fn.expand("$HOME/.config/wezterm")
 	local pref_file = config_dir .. "/theme_preference"
 
 	-- Save theme preference
@@ -69,22 +82,22 @@ local function save_theme_preference(background)
 	end
 
 	-- Write WezTerm theme pointer file
-	local wezterm_theme_file = wezterm_dir .. "/wezterm_theme.lua"
-	local theme_path = wezterm_dir .. "/wezterm_" .. background .. ".lua"
-	file = io.open(wezterm_theme_file, "w")
-	if file then
-		file:write(theme_path)
-		file:close()
-	end
+	-- local wezterm_theme_file = wezterm_dir .. "/wezterm_theme.lua"
+	-- local theme_path = wezterm_dir .. "/wezterm_" .. background .. ".lua"
+	-- file = io.open(wezterm_theme_file, "w")
+	-- if file then
+	-- 	file:write(theme_path)
+	-- 	file:close()
+	-- end
 
 	-- Also write to WezTerm colorscheme file (legacy compatibility)
-	local wezterm_colorscheme_file = wezterm_dir .. "/colorscheme"
-	local wezterm_scheme = background == "dark" and "EverforestDark" or "EverforestLight"
-	file = io.open(wezterm_colorscheme_file, "w")
-	if file then
-		file:write(wezterm_scheme)
-		file:close()
-	end
+	-- local wezterm_colorscheme_file = wezterm_dir .. "/colorscheme"
+	-- local wezterm_scheme = background == "dark" and "EverforestDark" or "EverforestLight"
+	-- file = io.open(wezterm_colorscheme_file, "w")
+	-- if file then
+	-- 	file:write(wezterm_scheme)
+	-- 	file:close()
+	-- end
 end
 
 -- Load saved theme preference
@@ -101,15 +114,15 @@ local function load_theme_preference()
 end
 
 -- Function to reload WezTerm configuration
-local function reload_wezterm()
-	-- Touch the theme preference file to trigger WezTerm's file watcher
-	local pref_file = vim.fn.expand("~/.config/nvim/theme_preference")
-	-- Update the file's modification time
-	vim.fn.system("touch " .. pref_file)
-
-	-- Also try the CLI reload as backup
-	vim.fn.system("wezterm cli reload-config 2>/dev/null &")
-end
+-- local function reload_wezterm()
+-- 	-- Touch the theme preference file to trigger WezTerm's file watcher
+-- 	local pref_file = vim.fn.expand("~/.config/nvim/theme_preference")
+-- 	-- Update the file's modification time
+-- 	vim.fn.system("touch " .. pref_file)
+-- 
+-- 	-- Also try the CLI reload as backup
+-- 	vim.fn.system("wezterm cli reload-config 2>/dev/null &")
+-- end
 
 -- Set up files on startup
 setup_theme_files()
@@ -149,9 +162,9 @@ function _G.ToggleTheme()
 	save_theme_preference(new_theme)
 
 	-- Force WezTerm to reload - try multiple methods
-	vim.defer_fn(function()
-		reload_wezterm()
-	end, 50)
+	-- vim.defer_fn(function()
+	-- 	reload_wezterm()
+	-- end, 50)
 
 	-- Print a message to confirm the theme change
 	print("Theme changed to " .. vim.o.background .. "")
@@ -183,7 +196,7 @@ vim.api.nvim_create_autocmd("OptionSet", {
 		end
 
 		-- Reload WezTerm configuration
-		reload_wezterm()
+		-- reload_wezterm()
 	end,
 })
 
