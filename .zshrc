@@ -75,3 +75,5 @@ source /opt/homebrew/share/zsh-history-substring-search/zsh-history-substring-se
 # Bind arrow keys for history substring search
 bindkey '^[[A' history-substring-search-up
 bindkey '^[[B' history-substring-search-down
+
+. "$HOME/.local/bin/env"

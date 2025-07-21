@@ -1,5 +1,5 @@
 return {
-	"GeorgesAlkhouri/nvim-aider",
+	"ubuygold/nvim-aider",
 	cmd = "Aider",
 	keys = {
 		{ "<leader>a/", "<cmd>Aider toggle<cr>", desc = "Toggle Aider" },

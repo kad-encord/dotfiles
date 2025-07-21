@@ -38,16 +38,16 @@ set -g status-left '#[fg=#8da101, bg=#f3efdf] #S #[default]'
 	-- 	config.color_scheme = "EverforestDark"
 	-- 	return config
 	-- end
-	-- 
+	--
 	-- return apply_theme
 	-- ]]
-	-- 
+	--
 	-- local wezterm_light_config = [[
 	-- local function apply_theme(config)
 	-- 	config.color_scheme = "EverforestLight"
 	-- 	return config
 	-- end
-	-- 
+	--
 	-- return apply_theme
 	-- ]]
 
@@ -119,7 +119,7 @@ end
 -- 	local pref_file = vim.fn.expand("~/.config/nvim/theme_preference")
 -- 	-- Update the file's modification time
 -- 	vim.fn.system("touch " .. pref_file)
--- 
+--
 -- 	-- Also try the CLI reload as backup
 -- 	vim.fn.system("wezterm cli reload-config 2>/dev/null &")
 -- end
@@ -219,7 +219,7 @@ return {
 		vim.g.everforest_diagnostic_text_highlight = 0
 		vim.g.everforest_diagnostic_line_highlight = 0
 		vim.g.everforest_diagnostic_virtual_text = "grey"
-		vim.g.everforest_current_word = "grey background"
+		vim.g.everforest_current_word = "high contrast background"
 
 		vim.cmd.colorscheme("everforest")
 	end,
