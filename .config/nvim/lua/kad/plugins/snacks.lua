@@ -167,6 +167,18 @@ return {
 			end,
 		},
 		{
+			"<leader>sss",
+			function()
+				require("aerial").snacks_picker({
+					layout = {
+						preset = "dropdown",
+						preview = false,
+					},
+				})
+			end,
+			desc = "Aerial (Symbols)",
+		},
+		{
 			"<leader>s/",
 			function()
 				Snacks.picker.search_history()
