@@ -67,3 +67,6 @@ end, { desc = "Show diagnostics on hover" })
 vim.keymap.set("n", "<leader>gg", function()
 	require("snacks.lazygit").open()
 end, { desc = "Open LazyGit via Snacks", noremap = true, silent = true })
+
+-- Search in very nomagic mode (literal search)
+keymap("n", "<leader>/", "/\\V", opts)

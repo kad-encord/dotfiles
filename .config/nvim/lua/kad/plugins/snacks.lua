@@ -68,6 +68,15 @@ return {
 		{
 			"<leader>st",
 			function()
+				Snacks.picker.grep({
+					args = { "--fixed-strings" },
+				})
+			end,
+			desc = "Grep (Literal)",
+		},
+		{
+			"<leader>sT",
+			function()
 				Snacks.picker.grep()
 			end,
 			desc = "Grep",
