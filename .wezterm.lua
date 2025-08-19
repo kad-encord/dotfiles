@@ -26,7 +26,7 @@ config.initial_rows = 150
 -- Disable title bar but enable resizable border
 config.window_decorations = "RESIZE"
 
-config.font_size = 15.5
+config.font_size = 14
 config.font = wezterm.font("JetBrains Mono NL", { weight = "Regular", style = "Normal" })
 
 -- Disable treating Alt as a modifier for commands
