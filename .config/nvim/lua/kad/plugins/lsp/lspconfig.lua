@@ -2,7 +2,7 @@ return {
 	"neovim/nvim-lspconfig",
 	event = { "BufReadPre", "BufNewFile" },
 	dependencies = {
-		"hrsh7th/cmp-nvim-lsp",
+		"saghen/blink.cmp",
 		"williamboman/mason.nvim", -- Add the base mason plugin
 		"williamboman/mason-lspconfig.nvim", -- Add this dependency explicitly
 		{ "antosha417/nvim-lsp-file-operations", config = true },
@@ -26,9 +26,6 @@ return {
 		-- import mason_lspconfig plugin
 		local mason_lspconfig = require("mason-lspconfig")
 
-		-- import cmp-nvim-lsp plugin
-		local cmp_nvim_lsp = require("cmp_nvim_lsp")
-
 		local keymap = vim.keymap
 
 		-- Setup mason-lspconfig after mason
@@ -40,7 +37,6 @@ return {
 				"tailwindcss",
 				"cssls",
 				"html",
-				"emmet_ls",
 				"lua_ls",
 				"jsonls",
 				"graphql",
@@ -82,7 +78,7 @@ return {
 		})
 
 		-- used to enable autocompletion (assign to every lsp server config)
-		local capabilities = cmp_nvim_lsp.default_capabilities()
+		local capabilities = require("blink.cmp").get_lsp_capabilities()
 
 		-- -- Change the Diagnostic symbols in the sign column (gutter)
 		-- local signs = { Error = " ", Warn = " ", Hint = "󰠠 ", Info = " " }
@@ -106,10 +102,7 @@ return {
 				filetypes = { "css", "scss" },
 			},
 			html = {
-				filetypes = { "html", "typescriptreact", "javascriptreact" },
-			},
-			emmet_ls = {
-				filetypes = { "html", "typescriptreact", "javascriptreact" },
+				filetypes = { "html" },
 			},
 			lua_ls = {
 				settings = {

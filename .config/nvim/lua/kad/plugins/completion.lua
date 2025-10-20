@@ -1,130 +1,122 @@
 return {
-	"hrsh7th/nvim-cmp",
-	event = "InsertEnter",
+	"saghen/blink.cmp",
+	version = "*",
 	dependencies = {
-		"hrsh7th/cmp-buffer", -- source for text in buffer
-		"hrsh7th/cmp-path", -- source for file system paths
+		"rafamadriz/friendly-snippets", -- useful snippets
 		{
 			"L3MON4D3/LuaSnip",
-			-- follow latest release.
-			version = "v2.*", -- Replace <CurrentMajor> by the latest released major (first number of latest release)
-			-- install jsregexp (optional!).
+			version = "v2.*",
 			build = "make install_jsregexp",
-		},
-		"saadparwaiz1/cmp_luasnip", -- for autocompletion
-		"rafamadriz/friendly-snippets", -- useful snippets
-		"onsails/lspkind.nvim", -- vs-code like pictograms
-		"roobert/tailwindcss-colorizer-cmp.nvim",
-		"hrsh7th/cmp-cmdline",
-	},
-	config = function()
-		local cmp = require("cmp")
-		local luasnip = require("luasnip")
-		local lspkind = require("lspkind")
-
-		-- Custom snippets
-		local s = luasnip.snippet
-		local t = luasnip.text_node
-		local i = luasnip.insert_node
-
-		-- Add custom snippets
-		luasnip.add_snippets("all", {
-			-- Snippet for class attribute
-			s("class", {
-				t('class="'),
-				i(1),
-				t('"'),
-			}),
-		})
-
-		-- Lods vscode style snippets from installed plugins (e.g. friendly-snippets)
-		require("luasnip.loaders.from_vscode").lazy_load()
-
-		-- Main nvim-cmp setup for insert mode
-		cmp.setup({
-			completion = {
-				completeopt = "menu,menuone,preview,noselect",
-			},
-			snippet = { -- Configure how nvim-cmp interacts with snippet engine
-				expand = function(args)
-					luasnip.lsp_expand(args.body)
-				end,
-			},
-			mapping = cmp.mapping.preset.insert({
-				["<C-k>"] = cmp.mapping.select_prev_item(), -- previous suggestion
-				["<C-j>"] = cmp.mapping.select_next_item(), -- next suggestion
-				["<C-b>"] = cmp.mapping.scroll_docs(-4),
-				["<C-f>"] = cmp.mapping.scroll_docs(4),
-				["<C-Space>"] = cmp.mapping.complete(), -- show completion suggestions
-				["<C-e>"] = cmp.mapping.abort(), -- close completion window
-				["<CR>"] = cmp.mapping.confirm({ select = true }),
-
-				-- Add snippet jump functionality
-				["<Tab>"] = cmp.mapping(function(fallback)
-					if luasnip.expandable() then
-						luasnip.expand()
-					elseif luasnip.locally_jumpable(1) then
-						luasnip.jump(1)
-					elseif cmp.visible() then
-						cmp.select_next_item()
-					else
-						fallback()
-					end
-				end, { "i", "s" }),
-
-				["<S-Tab>"] = cmp.mapping(function(fallback)
-					if luasnip.locally_jumpable(-1) then
-						luasnip.jump(-1)
-					elseif cmp.visible() then
-						cmp.select_prev_item()
-					else
-						fallback()
-					end
-				end, { "i", "s" }),
-			}),
-			-- Sources for autocompletion
-			sources = cmp.config.sources({
-				{ name = "nvim_lsp" },
-				{ name = "luasnip" }, -- snippets
-				{ name = "buffer" }, -- text within current buffer
-				{ name = "path" }, -- file system paths
-			}),
-			opts = function()
-				return {
-					-- ...
-					formatting = {
-						format = require("lspkind").cmp_format({
-							before = require("tailwind-tools.cmp").lspkind_format,
-						}),
-					},
-				}
+			config = function()
+				-- Configure LuaSnip to avoid visual selection behavior
+				require("luasnip").config.set_config({
+					updateevents = "TextChanged,TextChangedI",
+					region_check_events = "CursorMoved",
+					delete_check_events = "TextChanged,InsertLeave",
+					-- Keep cursor in insert mode, don't use select mode
+					store_selection_keys = "<Tab>",
+				})
+				-- Load friendly-snippets
+				require("luasnip.loaders.from_vscode").lazy_load()
 			end,
-			-- Configure lspkind for vs-code like pictograms in completion menu
-			formatting = {
-				format = lspkind.cmp_format({
-					maxwidth = 50,
-					ellipsis_char = "...",
-				}),
+		},
+	},
+	opts = {
+		keymap = {
+			preset = "default",
+			["<C-k>"] = { "select_prev", "fallback" },
+			["<C-j>"] = { "select_next", "fallback" },
+			["<C-b>"] = { "scroll_documentation_up", "fallback" },
+			["<C-f>"] = { "scroll_documentation_down", "fallback" },
+			["<C-space>"] = { "show", "show_documentation", "hide_documentation" },
+			["<C-e>"] = { "hide", "fallback" },
+			["<CR>"] = { "accept", "fallback" },
+			["<Tab>"] = {
+				function(cmp)
+					if cmp.snippet_active() then
+						return cmp.snippet_forward()
+					else
+						return cmp.select_next()
+					end
+				end,
+				"fallback",
 			},
-		})
-
-		-- Additional setup for cmdline completion
-		-- `/` cmdline setup.
-		cmp.setup.cmdline("/", {
-			mapping = cmp.mapping.preset.cmdline(),
-			sources = {
-				{ name = "buffer" },
+			["<S-Tab>"] = {
+				function(cmp)
+					if cmp.snippet_active() then
+						return cmp.snippet_backward()
+					else
+						return cmp.select_prev()
+					end
+				end,
+				"fallback",
 			},
-		})
-
-		-- `:` cmdline setup.
-		cmp.setup.cmdline(":", {
-			mapping = cmp.mapping.preset.cmdline(),
-			sources = cmp.config.sources({
-				{ name = "path" },
-			}, {
-				{ name = "cmdline" },
-			}),
-		})
-	end,
+		},
+		appearance = {
+			use_nvim_cmp_as_default = true,
+			nerd_font_variant = "mono",
+		},
+		sources = {
+			default = { "lsp", "path", "snippets", "buffer" },
+			providers = {
+				lsp = {
+					name = "LSP",
+					module = "blink.cmp.sources.lsp",
+					score_offset = 100, -- Prioritize LSP
+				},
+				path = {
+					name = "Path",
+					module = "blink.cmp.sources.path",
+					score_offset = 3,
+				},
+				snippets = {
+					name = "Snippets",
+					module = "blink.cmp.sources.snippets",
+					score_offset = -3,
+				},
+				buffer = {
+					name = "Buffer",
+					module = "blink.cmp.sources.buffer",
+					score_offset = -5,
+				},
+			},
+		},
+		completion = {
+			menu = {
+				draw = {
+					columns = { { "kind_icon" }, { "label", "label_description", gap = 1 }, { "kind" } },
+				},
+			},
+			documentation = {
+				auto_show = true,
+				auto_show_delay_ms = 200,
+			},
+			ghost_text = {
+				enabled = false,
+			},
+			accept = {
+				auto_brackets = {
+					enabled = true,
+				},
+			},
+		},
+		snippets = {
+			expand = function(snippet)
+				require("luasnip").lsp_expand(snippet)
+			end,
+			active = function(filter)
+				if filter and filter.direction then
+					return require("luasnip").jumpable(filter.direction)
+				end
+				return require("luasnip").in_snippet()
+			end,
+			jump = function(direction)
+				require("luasnip").jump(direction)
+			end,
+		},
+		signature = {
+			enabled = true,
+		},
+	},
+	opts_extend = { "sources.default" },
 }

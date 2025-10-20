@@ -27,7 +27,6 @@ return {
 					"cssls",
 					"tailwindcss",
 					"lua_ls",
-					"emmet_ls",
 					"pyright",
 					-- Added for React/Gatsby support:
 					"jsonls",
