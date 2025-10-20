@@ -77,3 +77,6 @@ bindkey '^[[A' history-substring-search-up
 bindkey '^[[B' history-substring-search-down
 
 . "$HOME/.local/bin/env"
+
+source ~/.safe-chain/scripts/init-posix.sh # Safe-chain Zsh initialization script
+export PATH="/Users/kad/.nvm/versions/node/v22.17.0/bin:$PATH"

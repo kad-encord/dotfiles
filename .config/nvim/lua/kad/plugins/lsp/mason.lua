@@ -30,7 +30,6 @@ return {
 					"emmet_ls",
 					"pyright",
 					-- Added for React/Gatsby support:
-					"eslint",
 					"jsonls",
 					"graphql",
 				},

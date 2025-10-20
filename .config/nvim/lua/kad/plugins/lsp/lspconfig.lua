@@ -23,9 +23,6 @@ return {
 			},
 		})
 
-		-- import lspconfig plugin
-		local lspconfig = require("lspconfig")
-
 		-- import mason_lspconfig plugin
 		local mason_lspconfig = require("mason-lspconfig")
 
@@ -45,12 +42,9 @@ return {
 				"html",
 				"emmet_ls",
 				"lua_ls",
-				"eslint",
 				"jsonls",
 				"graphql",
 			},
-			-- Whether servers that are set up (via lspconfig) should be automatically installed
-			automatic_installation = true,
 		})
 
 		vim.api.nvim_create_autocmd("LspAttach", {
@@ -97,8 +91,7 @@ return {
 		-- 	vim.fn.sign_define(hl, { text = icon, texthl = hl, numhl = "" })
 		-- end
 
-		-- In Neovim 0.11.1, we'll use the recommended handler approach for safety
-		-- Define server configurations
+		-- Define server configurations using Neovim 0.11+ native vim.lsp.config API
 		local servers = {
 			pyright = {
 				filetypes = { "python" },
@@ -130,9 +123,6 @@ return {
 					},
 				},
 			},
-			eslint = {
-				filetypes = { "javascript", "javascriptreact", "typescript", "typescriptreact" },
-			},
 			jsonls = {
 				filetypes = { "json", "jsonc" },
 			},
@@ -141,13 +131,11 @@ return {
 			},
 		}
 
-		-- Setup all servers with our defined configurations
+		-- Configure and enable all servers using the new vim.lsp.config API
 		for server_name, server_config in pairs(servers) do
-			-- Add capabilities to each server config
 			server_config.capabilities = capabilities
-
-			-- Setup the language server with the combined configuration
-			lspconfig[server_name].setup(server_config)
+			vim.lsp.config(server_name, server_config)
+			vim.lsp.enable(server_name)
 		end
 	end,
 }
