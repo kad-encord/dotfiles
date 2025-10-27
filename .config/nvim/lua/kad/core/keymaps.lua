@@ -36,6 +36,12 @@ vim.keymap.set("n", "<leader>w", function()
 	vim.cmd("write")
 end, { noremap = true, silent = true })
 
+-- Reload current buffer from disk
+vim.keymap.set("n", "<leader>r", function()
+	vim.cmd("edit")
+	print("Buffer reloaded from disk")
+end, { noremap = true, silent = true, desc = "Reload buffer from disk" })
+
 -- Quit with leader q
 keymap("n", "<leader>q", ":q<CR>", opts)
 

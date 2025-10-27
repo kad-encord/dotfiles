@@ -96,7 +96,7 @@ return {
 				filetypes = { "typescript", "javascript", "typescriptreact", "javascriptreact" },
 			},
 			tailwindcss = {
-				filetypes = { "html", "typescriptreact", "javascriptreact" },
+				filetypes = { "html", "javascript", "javascriptreact", "typescript", "typescriptreact" },
 			},
 			cssls = {
 				filetypes = { "css", "scss" },

@@ -37,6 +37,17 @@ opt.splitbelow = true -- split horizontal window to the bottom
 -- turn off swapfile
 opt.swapfile = false
 
+-- Auto-reload files when they change on disk
+opt.autoread = true
+vim.api.nvim_create_autocmd({ "FocusGained", "BufEnter", "CursorHold", "CursorHoldI" }, {
+	pattern = "*",
+	callback = function()
+		if vim.fn.mode() ~= "c" then
+			vim.cmd("checktime")
+		end
+	end,
+})
+
 -- Function to highlight yanked text
 local function highlight_yank()
 	-- Define the highlight group for yanked text

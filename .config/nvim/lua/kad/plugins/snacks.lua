@@ -10,7 +10,8 @@ return {
 		--   -- refer to the configuration section below
 		-- },
 		picker = {
-			formatters = {
+			hidden = true,
+		formatters = {
 				file = {
 					truncate = 100,
 				},
@@ -112,7 +113,7 @@ return {
 		{
 			"<leader>sf",
 			function()
-				Snacks.picker.files()
+				Snacks.picker.files({ hidden = true, ignored = true })
 			end,
 			desc = "Find Files",
 		},
