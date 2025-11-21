@@ -1,6 +1,5 @@
 return {
 	"luckasRanarison/tailwind-tools.nvim",
-	enabled = false,
 	name = "tailwind-tools",
 	build = ":UpdateRemotePlugins",
 	dependencies = {
@@ -8,5 +7,9 @@ return {
 		"nvim-telescope/telescope.nvim", -- optional
 		"neovim/nvim-lspconfig", -- optional
 	},
-	opts = {}, -- your configuration
+	opts = {
+		server = {
+			override = false, -- Don't let tailwind-tools manage the LSP
+		},
+	},
 }

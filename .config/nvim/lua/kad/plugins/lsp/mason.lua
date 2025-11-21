@@ -45,7 +45,6 @@ return {
 				"black",
 				"pylint",
 				"eslint_d",
-				"stylelint",
 				"graphql-language-service-cli", -- GraphQL tooling
 			},
 		})
