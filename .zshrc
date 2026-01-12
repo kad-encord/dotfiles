@@ -81,5 +81,14 @@ bindkey '^[[B' history-substring-search-down
 
 . "$HOME/.local/bin/env"
 
-source ~/.safe-chain/scripts/init-posix.sh # Safe-chain Zsh initialization script
 export PATH="/Users/kad/.nvm/versions/node/v22.17.0/bin:$PATH"
+
+# bun completions
+[ -s "/Users/kad/.bun/_bun" ] && source "/Users/kad/.bun/_bun"
+
+# bun
+export BUN_INSTALL="$HOME/.bun"
+export PATH="$BUN_INSTALL/bin:$PATH"
+
+
+source ~/.safe-chain/scripts/init-posix.sh # Safe-chain Zsh initialization script

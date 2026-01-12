@@ -1,26 +1,6 @@
 return {
 	"saghen/blink.cmp",
 	version = "*",
-	dependencies = {
-		"rafamadriz/friendly-snippets", -- useful snippets
-		{
-			"L3MON4D3/LuaSnip",
-			version = "v2.*",
-			build = "make install_jsregexp",
-			config = function()
-				-- Configure LuaSnip to avoid visual selection behavior
-				require("luasnip").config.set_config({
-					updateevents = "TextChanged,TextChangedI",
-					region_check_events = "CursorMoved",
-					delete_check_events = "TextChanged,InsertLeave",
-					-- Keep cursor in insert mode, don't use select mode
-					store_selection_keys = "<Tab>",
-				})
-				-- Load friendly-snippets
-				require("luasnip.loaders.from_vscode").lazy_load()
-			end,
-		},
-	},
 	opts = {
 		keymap = {
 			preset = "default",
@@ -31,48 +11,68 @@ return {
 			["<C-space>"] = { "show", "show_documentation", "hide_documentation" },
 			["<C-e>"] = { "hide", "fallback" },
 			["<CR>"] = { "accept", "fallback" },
-			["<Tab>"] = {
-				function(cmp)
-					if cmp.snippet_active() then
-						return cmp.snippet_forward()
-					else
-						return cmp.select_next()
-					end
-				end,
-				"fallback",
-			},
-			["<S-Tab>"] = {
-				function(cmp)
-					if cmp.snippet_active() then
-						return cmp.snippet_backward()
-					else
-						return cmp.select_prev()
-					end
-				end,
-				"fallback",
-			},
+			["<Tab>"] = { "select_next", "fallback" },
+			["<S-Tab>"] = { "select_prev", "fallback" },
 		},
 		appearance = {
 			use_nvim_cmp_as_default = true,
 			nerd_font_variant = "mono",
 		},
 		sources = {
-			default = { "lsp", "path", "snippets", "buffer" },
+			default = { "lsp", "path", "buffer" },
 			providers = {
 				lsp = {
 					name = "LSP",
 					module = "blink.cmp.sources.lsp",
 					score_offset = 100, -- Prioritize LSP
+					transform_items = function(ctx, items)
+						return vim.tbl_filter(function(item)
+							-- Filter out bracket-only snippets that conflict with auto-brackets
+							-- Check both label and text fields
+							local label = item.label or ""
+							local text = item.insertText or (item.textEdit and item.textEdit.newText) or ""
+
+							-- Filter bracket completions: (), {}, [], etc.
+							if item.kind == 15 then -- Snippet kind
+								-- Check label for exact bracket pairs
+								if label:match("^[%(%[%{][%)%]%}]$") then
+									return false
+								end
+								-- Check text for bracket patterns
+								if text ~= "" and (text:match("^[%(%[%{][%)%]%}]$") or text:match("^[%(%[%{]%$%{.-%}[%)%]%}]$")) then
+									return false
+								end
+							end
+
+							local filetype = vim.bo.filetype
+							if filetype == "javascriptreact" or filetype == "typescriptreact" then
+								-- Check if user is typing after '<' (creating a tag)
+								local line = ctx.line
+								local col = ctx.cursor[2]
+								local before_cursor = line:sub(1, col)
+
+								-- If the character before the word is '<', allow HTML tag completions
+								local typing_new_tag = before_cursor:match("<%s*[a-z]*$") or before_cursor:match("^[a-z]*$")
+
+								-- Only filter HTML snippets if NOT creating a new tag
+								if not typing_new_tag then
+									-- Filter items with kind=15 (Snippet) that create HTML tags
+									if item.kind == 15 and item.insertTextFormat == 2 then
+										-- Filter if it matches pattern: <word>${...}</word>
+										if text:match("^<[a-z]+>%${.+}</[a-z]+>$") then
+											return false
+										end
+									end
+								end
+							end
+							return true
+						end, items)
+					end,
 				},
 				path = {
 					name = "Path",
 					module = "blink.cmp.sources.path",
 					score_offset = 3,
-				},
-				snippets = {
-					name = "Snippets",
-					module = "blink.cmp.sources.snippets",
-					score_offset = -3,
 				},
 				buffer = {
 					name = "Buffer",
@@ -99,20 +99,6 @@ return {
 					enabled = true,
 				},
 			},
-		},
-		snippets = {
-			expand = function(snippet)
-				require("luasnip").lsp_expand(snippet)
-			end,
-			active = function(filter)
-				if filter and filter.direction then
-					return require("luasnip").jumpable(filter.direction)
-				end
-				return require("luasnip").in_snippet()
-			end,
-			jump = function(direction)
-				require("luasnip").jump(direction)
-			end,
 		},
 		signature = {
 			enabled = true,

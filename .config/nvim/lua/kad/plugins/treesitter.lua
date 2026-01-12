@@ -17,6 +17,7 @@ return {
 					enable = true,
 				},
 				ensure_installed = {
+					"astro",
 					"json",
 					"javascript",
 					"typescript",

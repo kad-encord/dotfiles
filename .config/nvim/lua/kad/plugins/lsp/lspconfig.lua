@@ -30,8 +30,9 @@ return {
 
 		-- Setup mason-lspconfig after mason
 		mason_lspconfig.setup({
-			-- A list of servers to automatically install if they're not already installed
+			-- A list of servers to automatically install if they're not already installed (includes Astro)
 			ensure_installed = {
+				"astro",
 				"pyright",
 				"ts_ls",
 				"tailwindcss",
@@ -92,11 +93,30 @@ return {
 			pyright = {
 				filetypes = { "python" },
 			},
+			astro = {
+				filetypes = { "astro" },
+			},
 			ts_ls = {
 				filetypes = { "typescript", "javascript", "typescriptreact", "javascriptreact" },
+				settings = {
+					typescript = {
+						preferences = {
+							jsxAttributeCompletionStyle = "auto", -- Insert ={} or ="" based on type
+							includeCompletionsWithSnippetText = true,
+							includeCompletionsForModuleExports = true,
+						},
+					},
+					javascript = {
+						preferences = {
+							jsxAttributeCompletionStyle = "auto",
+							includeCompletionsWithSnippetText = true,
+							includeCompletionsForModuleExports = true,
+						},
+					},
+				},
 			},
 			tailwindcss = {
-				filetypes = { "html", "javascript", "javascriptreact", "typescript", "typescriptreact", "css", "scss" },
+				filetypes = { "html", "javascript", "javascriptreact", "typescript", "typescriptreact", "css", "scss", "astro" },
 			},
 			cssls = {
 				filetypes = { "css", "scss" },
