@@ -38,6 +38,9 @@ alias ...="cd ../.."
 alias q="exit"
 alias gocode="cd /Users/kad/Desktop/code"
 alias golan="cd /Users/kad/Desktop/code/cord-landing-page"
+alias gobe="cd /Users/kad/Desktop/code/cord-backend"
+alias gofe="cd /Users/kad/Desktop/code/cord-frontend"
+alias godot="cd /Users/kad/dotfiles"
 
 # tmux
 alias t="tmux"
@@ -92,3 +95,13 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 
 
 source ~/.safe-chain/scripts/init-posix.sh # Safe-chain Zsh initialization script
+
+# pnpm
+export PNPM_HOME="/Users/kad/Library/pnpm"
+case ":$PATH:" in
+  *":$PNPM_HOME:"*) ;;
+  *) export PATH="$PNPM_HOME:$PATH" ;;
+esac
+# pnpm end
+
+source ~/dotfiles/ticket.sh

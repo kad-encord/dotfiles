@@ -67,6 +67,7 @@ config.keys = {
 	{ key = "k", mods = "ALT", action = act.SendKey({ key = "k", mods = "ALT" }) },
 	{ key = "h", mods = "ALT", action = act.SendKey({ key = "h", mods = "ALT" }) },
 	{ key = "l", mods = "ALT", action = act.SendKey({ key = "l", mods = "ALT" }) },
+	{ key = "t", mods = "ALT", action = act.SendKey({ key = "t", mods = "ALT" }) },
 }
 
 return config
