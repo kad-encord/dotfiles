@@ -4,6 +4,39 @@ Personal dotfiles. The centerpiece is **`ticket.sh`** — a Linear-ticket-driven
 workflow that pairs a git worktree, a tmux session, and a Claude agent per
 ticket, with a floating dashboard for navigating between them.
 
+![The ticket dashboard](docs/ticket-dashboard.png)
+
+*The dashboard (`prefix + s`): every worktree with its live agent/dev/git/PR
+status on the left, and the highlighted ticket's Linear context on the right.*
+
+---
+
+## Highlights
+
+- **One command per ticket.** Paste a Linear branch name and get a ready-to-work
+  environment: an isolated git worktree, a dedicated tmux session, a Claude agent
+  already primed with the ticket's context, and a dev server on its own port.
+- **True parallel tickets.** Every ticket is its own worktree, branch, and dev
+  port, so several can be in-flight at once — no stashing, no branch-switching,
+  no port clashes. Jump between them from the dashboard.
+- **Linear-aware.** The issue's title and description are fetched up front, saved
+  into the worktree for the agent to read, and shown in the status bar and
+  dashboard. Backfill older worktrees on demand.
+- **Agent-aware.** The dashboard shows, per ticket, whether the Claude agent is
+  idle, actively working, or waiting on you — so you can see across every ticket
+  which one needs attention without opening it.
+- **Status at a glance.** Each row surfaces dev-server up/down, git
+  ahead/behind/dirty, and live GitHub PR check status.
+- **Instant dashboard.** The popup paints from a cache immediately and refreshes
+  in the background, so it opens with no perceptible delay.
+- **Create & clean up in place.** Spin up new tickets or general sessions, and
+  tear down finished ones, right from the dashboard. Removal is non-blocking and
+  always keeps the branch.
+- **General sessions too.** Long-running non-ticket sessions (`fe` / `be` / `lp`
+  / dotfiles / custom) live alongside tickets under **OTHER SESSIONS**.
+- **Survives restarts.** tmux-resurrect + continuum persist and auto-restore your
+  sessions across reboots.
+
 ---
 
 ## `ticket.sh` — one ticket → one worktree → one tmux session
@@ -97,40 +130,72 @@ Without `gh`, the badge stays empty.
 
 ---
 
-## Tmux integration
+## The dashboard (`prefix + s`)
 
-### Hotkey (with `C-a` prefix)
+A floating popup listing every worktree under `~/worktrees`, plus any other live
+tmux sessions. It opens **instantly** — it paints the last-rendered rows from a
+cache and refreshes in the background — and it's the main way to move between
+tickets.
 
-| Chord        | Action |
-|--------------|--------|
-| `prefix + s` | **Ticket dashboard** — floating popup with every worktree, its dev/git/PR status, and Linear title. Switches sessions, opens PRs, unticks worktrees, all from one place. |
+Each row has these columns:
 
-Inside the dashboard, **navigation** (vim-style — search is off until you press `/`):
+| Column     | Meaning |
+|------------|---------|
+| **STATUS** | Session + agent state (see glyphs below) |
+| **REPO**   | Short repo label — `fe` / `be` / `lp` / … |
+| **TICKET** | Slug (e.g. `de-11`) |
+| **DEV**    | Dev server: `✓ <port>` up, `✗ <port>` down, `—` none |
+| **GIT**    | `↑n` ahead, `↓n` behind, `*` dirty, or `clean` |
+| **PR**     | GitHub PR badge (same glyphs as the status line, below) |
+| **TITLE**  | Linear issue title |
+
+The **STATUS** glyph combines whether a tmux session exists with what the Claude
+agent is doing (sampled from the `claude` pane):
+
+| Glyph | Meaning |
+|-------|---------|
+| `○`   | dim — no tmux session (dormant worktree) |
+| `●`   | session live · agent idle at the prompt |
+| `◐`   | session live · agent working (running a tool / streaming) |
+| `⚠`   | session live · agent waiting for you to respond |
+
+The **right pane** previews the highlighted ticket's Linear title, state,
+description, recent commits, and working-tree changes.
+
+### Keys
+
+**Navigate** (vim-style — fuzzy search is off until you press `/`):
 
 | Key            | Action |
 |----------------|--------|
 | `j` / `k`      | Down / up |
 | `g` / `G`      | First / last row |
 | `Ctrl-D` / `Ctrl-U` | Half-page down / up |
-| `/`            | Enter search mode (typing filters; prompt changes to `/`) |
-| `Esc`          | Exit search mode back to vim nav |
-| `Ctrl-C` / `Ctrl-G` | Close popup |
-| `Enter`        | Switch to the session (or create one if dormant) |
+| `/`            | Toggle search mode (typing filters; the action keys type instead of acting) |
+| `q` / `Esc` / `Ctrl-C` | Close popup |
+| `Enter`        | Switch to the session (creating it if the worktree is dormant) |
 
-**Actions** (work in either mode):
+**Act** on the highlighted row (plain letters — no modifier):
 
-| Key      | Action |
-|----------|--------|
-| `Ctrl-X` | `ticket-rm`: kill session + remove worktree |
-| `Ctrl-O` | Open the Linear URL in your browser |
-| `Ctrl-P` | Open the PR in your browser (`gh pr view --web`) |
-| `Ctrl-E` | Open the worktree in `$EDITOR` |
-| `Ctrl-B` | Copy the branch name to clipboard |
-| `Ctrl-F` | Backfill Linear context for this worktree (if missing) |
-| `Ctrl-R` | Force-refresh all PR badges |
+| Key | Action |
+|-----|--------|
+| `x` | Remove the worktree + kill its session (prompts to force if the tree is dirty) |
+| `o` | Open the Linear issue in your browser |
+| `p` | Open the PR in your browser (`gh pr view --web`) |
+| `e` | Open the worktree in `$EDITOR` |
+| `b` | Copy the branch name to the clipboard |
+| `n` | New ticket (prompts for branch + repo) |
+| `N` | New general session (`fe` / `be` / `lp` / dotfiles / custom) |
+| `f` | Backfill Linear context for this worktree (if missing) |
+| `r` | Force-refresh all PR badges |
+| `?` | Show the full key reference in the preview pane |
 
-The right pane shows the Linear title, state, description, recent commits, and
-working-tree changes for whichever row is highlighted.
+`x` is non-blocking: a worktree's `node_modules` is often 2 GB+, so instead of
+deleting inline (which froze the popup for ~10s) it renames the working dir aside
+and deletes it in the background. The branch is always kept. Killing the session
+you're *currently in* closes the popup and drops you into another session.
+
+## Tmux integration
 
 ### Status line
 
@@ -157,13 +222,19 @@ refreshes every 10s but only hits `gh` when the cache is stale.
   .tmux.conf                   binds + status-line wiring
   .zshrc                       sources ticket.sh at the bottom
   bin/
+    ticket-dashboard           prefix+s popup (fzf-based); paints from a row cache, refreshes async
+    ticket-rm                  `x` handler: remove worktree (non-blocking) + kill session
+    ticket-new                 `n` handler: prompt for a branch + repo, then create a ticket
+    ticket-new-session         `N` handler: create/attach a general (non-ticket) session
+    ticket-claude-state        detect the claude pane's state (idle / working / waiting) for STATUS
     ticket-linear-fetch        GraphQL fetch of one Linear issue
-    ticket-dashboard           prefix+s popup (fzf-based)
-    ticket-preview             right-pane renderer for the dashboard
     ticket-backfill            populate ticket.json/.ticket-context.md for an existing worktree
-    ticket-open-linear         Ctrl-O helper: opens URL only if one is cached
-    ticket-pr-badge            status-line PR badge w/ disk cache
-    ticket-rm                  helper: kill session + remove worktree
+    ticket-open-linear         `o` helper: opens the Linear URL only if one is cached
+    ticket-pr-badge            status-line + dashboard PR badge w/ disk cache
+    ticket-preview             richer worktree preview renderer
+    ticket-preview-row         right-pane renderer for a dashboard row
+    ticket-preview-session     right-pane renderer for an OTHER-SESSION row
+    ticket-help                full key reference (shown on `?`)
 
 ~/worktrees/<repo>/<slug>/     the worktree itself
   .ticket-context.md           Linear title + description (gitignored locally)
@@ -172,7 +243,9 @@ refreshes every 10s but only hits `gh` when the cache is stale.
   per-ticket metadata: identifier, title, description, state, url,
   branch, repo, port, created_at
 
-~/.cache/ticket/pr-<slug>.txt  cached PR badge per session
+~/.cache/ticket/
+  pr-<slug>.txt                cached PR badge per session
+  rows.txt                     last-rendered dashboard rows (for instant paint on open)
 ```
 
 ---
@@ -182,20 +255,20 @@ refreshes every 10s but only hits `gh` when the cache is stale.
 **Dashboard shows `—` for titles even after I created a ticket.**
 The Linear fetch needs `LINEAR_API_KEY`. The dashboard auto-sources
 `~/.zshenv` on startup, so once the key is in that file the next popup will
-have it. For existing worktrees, hit `Ctrl-F` on a row (or run
+have it. For existing worktrees, press `f` on a row (or run
 `ticket-backfill --all` from a shell) to populate `ticket.json` for all of
 them.
 
-**Ctrl-F in the dashboard says "no linear context cached" or just flashes.**
+**`f` in the dashboard says "no linear context cached" or just flashes.**
 The backfill failed — probably because Linear couldn't be reached or your
 key is invalid. Run `ticket-backfill <slug>` from a shell to see the actual
 error. The dashboard auto-sources `~/.zshenv`, but if the tmux server was
 started before you added the key, you can also push it into the running
 server with `tmux setenv -g LINEAR_API_KEY "$LINEAR_API_KEY"`.
 
-**Ctrl-O does nothing.**
-The row has no cached Linear URL (yet). Press `Ctrl-F` first to backfill,
-then `Ctrl-O` will open the issue in your browser.
+**`o` does nothing.**
+The row has no cached Linear URL (yet). Press `f` first to backfill,
+then `o` will open the issue in your browser.
 
 **Two repos with the same ticket id collide.**
 Sessions are named purely by slug. If you `ticket --fe kad/de-20` *and*
