@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# ticket-claude-state <session-name>
+#
+# Detects the state of the claude pane inside a ticket's tmux session.
+# Prints one of:
+#   none      no tmux session for this slug
+#   idle      session is live, claude pane is at the input prompt
+#   working   claude is streaming / running a tool ("esc to interrupt")
+#   waiting   claude is asking for permission or input
+#
+# Works by sampling the last ~40 lines of the `claude` window's first pane
+# and matching well-known Claude Code CLI patterns.
+
+set -euo pipefail
+export LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+
+sess="${1:?usage: ticket-claude-state <session-name>}"
+
+if ! tmux has-session -t "=$sess" 2>/dev/null; then
+  echo none; exit 0
+fi
+
+# Grab the visible buffer + a chunk above it. -p prints to stdout.
+content="$(tmux capture-pane -t "${sess}:claude" -p -S -40 2>/dev/null || true)"
+if [ -z "$content" ]; then
+  echo idle; exit 0
+fi
+
+# Trim trailing blank lines so we examine the actual tail
+tail_content="$(printf '%s' "$content" | awk 'NF {p=NR} {a[NR]=$0} END {for(i=1;i<=p;i++) print a[i]}')"
+
+# 1) Working — claude is actively running a tool / streaming output.
+#    Claude Code shows an "esc to interrupt" hint while it's busy, plus
+#    common spinner glyphs and an "↑" continuation marker.
+if printf '%s' "$tail_content" | grep -qE 'esc to interrupt|tokens · esc|running for [0-9]+s|⏵⏵|✻|⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏' ; then
+  echo working; exit 0
+fi
+
+# 2) Waiting — claude is presenting numbered choices or a yes/no prompt.
+#    Patterns: "❯ 1. Yes", "1. Yes", "Do you want to proceed?", "(y/n)".
+if printf '%s' "$tail_content" \
+   | grep -qE '(❯[[:space:]]+|^[[:space:]]*)[12]\.[[:space:]]|Do you want|Continue\?|\(y/n\)|Approve\?|Press Enter to continue|yes/no'; then
+  echo waiting; exit 0
+fi
+
+echo idle

@@ -66,6 +66,9 @@ export PATH=/opt/homebrew/bin:$PATH
 export EDITOR=nvim
 export VISUAL=nvim
 
+# GitHub MCP server token (resolved from gh CLI login; no secret stored here)
+export GITHUB_PERSONAL_ACCESS_TOKEN="$(gh auth token 2>/dev/null)"
+
 # ============================================================================
 # Plugins
 # ============================================================================

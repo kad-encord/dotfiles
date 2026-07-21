@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# ticket-linear-fetch <linear-id>
+# Prints the Linear issue as JSON: {identifier, title, description, state, url}.
+# Requires LINEAR_API_KEY (personal API key from Linear settings → API).
+
+set -euo pipefail
+id="${1:?usage: ticket-linear-fetch <linear-id>}"
+if [ -z "${LINEAR_API_KEY:-}" ] && [ -f "$HOME/.zshenv" ]; then
+  set -a; . "$HOME/.zshenv"; set +a
+fi
+[ -n "${LINEAR_API_KEY:-}" ] || { echo "LINEAR_API_KEY not set" >&2; exit 1; }
+
+id_upper="$(printf '%s' "$id" | tr '[:lower:]' '[:upper:]')"
+payload="$(jq -nc --arg id "$id_upper" '{
+  query: "query($id: String!) { issue(id: $id) { identifier title description state { name } url } }",
+  variables: {id: $id}
+}')"
+
+resp="$(curl -sS --max-time 10 -X POST https://api.linear.app/graphql \
+  -H "Authorization: $LINEAR_API_KEY" \
+  -H "Content-Type: application/json" \
+  --data "$payload")" || { echo "Linear request failed" >&2; exit 1; }
+
+issue="$(printf '%s' "$resp" | jq '.data.issue // null')"
+[ "$issue" != "null" ] || { echo "Linear: issue $id_upper not found" >&2; exit 1; }
+printf '%s' "$issue" | jq '{identifier, title, description, state: .state.name, url}'

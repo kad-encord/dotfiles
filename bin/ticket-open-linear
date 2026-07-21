@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# ticket-open-linear <url>
+# Opens the Linear URL if present; no-ops if missing (so Ctrl-O on a
+# not-yet-backfilled row doesn't try to `open '-'`).
+url="${1:-}"
+[ -n "$url" ] && [ "$url" != "-" ] && open "$url"
+exit 0

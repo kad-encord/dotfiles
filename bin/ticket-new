@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# ticket-new — prompts for a branch + repo and creates a new ticket via the
+# `ticket` zsh function. Bound to Ctrl-N in the dashboard popup.
+
+set -euo pipefail
+export LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+
+C_RESET=$'\033[0m'
+C_DIM=$'\033[2m'
+C_BOLD=$'\033[1m'
+C_ACC=$'\033[38;5;141m'
+
+clear
+printf '\n  %s%sNEW TICKET%s\n\n' "$C_ACC" "$C_BOLD" "$C_RESET"
+
+printf '  %sPaste from Linear → Copy git branch name (e.g. kad/de-20-fix-login)%s\n' "$C_DIM" "$C_RESET"
+printf '  branch: '
+read -r branch
+[ -z "$branch" ] && { echo "  (cancelled)"; sleep 1; exit 0; }
+
+echo
+printf '  %srepo:%s  [1] fe   [2] be   %s(enter for fe)%s\n' "$C_DIM" "$C_RESET" "$C_DIM" "$C_RESET"
+printf '  choose: '
+read -r choice
+case "$choice" in
+  2|be) flag=--be ;;
+  *)    flag=--fe ;;
+esac
+
+echo
+printf '  %screating ticket %s%s%s ...\n\n' "$C_DIM" "$C_BOLD" "$branch" "$C_RESET"
+
+# Hand off to ticket() via an interactive zsh so .zshrc env (PATH/nvm/pnpm) is
+# loaded. ticket.sh is sourced from ~/.zshrc, so `ticket` is in scope.
+exec zsh -ic "ticket $flag '$branch'"

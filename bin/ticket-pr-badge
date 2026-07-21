@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# ticket-pr-badge [--refresh] <session-name>
+#
+# Default mode: prints the cached PR badge for the given session and, if the cache
+# is older than 60s, kicks off a background refresh. Designed to be called from
+# tmux status-right on each redraw — safe to spam.
+#
+# --refresh mode: hits `gh pr view` and updates the cache (called from background).
+#
+# Badge symbols:
+#   ● #123 ✓   open, checks passing
+#   ● #123 ✗   open, checks failing
+#   ● #123 …   open, checks pending / no checks
+#   ◆ #123     merged
+#   ○ #123     closed (unmerged)
+#   (empty)    no PR / not a ticket session / gh failed
+
+set -euo pipefail
+: "${TICKET_WT_ROOT:=$HOME/worktrees}"
+: "${TICKET_CACHE_DIR:=$HOME/.cache/ticket}"
+mkdir -p "$TICKET_CACHE_DIR" 2>/dev/null || true
+
+refresh=0
+if [ "${1:-}" = "--refresh" ]; then refresh=1; shift; fi
+sess="${1:-}"
+[ -n "$sess" ] || exit 0
+
+cache="$TICKET_CACHE_DIR/pr-$sess.txt"
+
+mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
+
+if [ "$refresh" -eq 1 ]; then
+  wt=""
+  for d in "$TICKET_WT_ROOT"/*/"$sess"; do
+    [ -d "$d" ] && wt="$d" && break
+  done
+  if [ -z "$wt" ]; then : > "$cache"; exit 0; fi
+
+  branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  if [ -z "$branch" ]; then : > "$cache"; exit 0; fi
+
+  out="$(cd "$wt" && gh pr view "$branch" --json state,statusCheckRollup,number 2>/dev/null || true)"
+  if [ -z "$out" ]; then : > "$cache"; exit 0; fi
+
+  badge="$(printf '%s' "$out" | jq -r '
+    .state as $s
+    | (.number | tostring) as $n
+    | (
+        if (.statusCheckRollup // [] | length) == 0 then "none"
+        elif any(.statusCheckRollup[]?; .conclusion == "FAILURE" or .conclusion == "TIMED_OUT" or .conclusion == "CANCELLED") then "fail"
+        elif any(.statusCheckRollup[]?; .conclusion == null or .conclusion == "" or .status == "IN_PROGRESS" or .status == "QUEUED" or .status == "PENDING") then "pending"
+        else "pass"
+        end
+      ) as $checks
+    | if $s == "MERGED" then "◆ #" + $n
+      elif $s == "CLOSED" then "○ #" + $n
+      else
+        ("● #" + $n) +
+        (if   $checks == "pass"    then " ✓"
+         elif $checks == "fail"    then " ✗"
+         elif $checks == "pending" then " …"
+         else "" end)
+      end
+  ')" || badge=""
+  printf '%s' "$badge" > "$cache"
+  exit 0
+fi
+
+# Default mode: print cached, kick off refresh if stale
+age=999
+[ -f "$cache" ] && age=$(( $(date +%s) - $(mtime "$cache") ))
+
+if [ "$age" -ge 60 ]; then
+  ( nohup "$0" --refresh "$sess" >/dev/null 2>&1 & ) >/dev/null 2>&1
+fi
+
+[ -f "$cache" ] && cat "$cache" || printf ''

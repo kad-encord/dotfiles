@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+# ticket-rm <slug> <worktree-path>
+# Bound to `x` in the dashboard. Removes the worktree and kills its tmux session.
+# If the worktree has uncommitted changes, prompts to force. The branch is kept.
+#
+# Design notes:
+#   - No `set -e`: we don't want silent exits if a sub-command errors.
+#   - Interactive I/O goes through /dev/tty (fzf doesn't always attach stdin
+#     cleanly to the executed command's pty).
+#   - Removal is non-blocking: the working dir is renamed aside and its (huge)
+#     node_modules is deleted in the background — see remove_worktree().
+#   - Killing the popup's OWN session can't be done from inside the modal popup,
+#     so it's recorded in $PENDING and carried out by the dashboard after fzf
+#     exits — see kill_session() / popup_session().
+
+set -uo pipefail
+export LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+: "${TICKET_CACHE_DIR:=$HOME/.cache/ticket}"
+
+# fzf's `execute` attaches stdin/stdout/stderr to the terminal. We use stderr
+# for output and /dev/tty for reads — stderr is reliably hooked up; stdin
+# sometimes isn't (which broke `read` in older versions of this script).
+say()   { printf '%b\n' "$*" >&2; }
+ask()   { printf '%s' "$1" >&2; }
+pause() {
+  say ""
+  say "  \033[2m(press Enter to continue)\033[0m"
+  if [ -r /dev/tty ]; then read -r _ </dev/tty 2>/dev/null || sleep 1.5; else sleep 1.5; fi
+}
+
+# The session this dashboard popup is hosted in. You cannot move a client off
+# its session while a modal popup is open (switch-client is deferred until the
+# popup closes), so killing this session from here would just detach the client
+# and blank the popup. Prefer the hint the tmux binding exported; fall back to a
+# live probe.
+popup_session() {
+  local c="${TICKET_HOME_SESS:-}"
+  [ -z "$c" ] && c="$(tmux display-message -p '#{client_session}' 2>/dev/null || true)"
+  printf '%s' "$c"
+}
+
+# Kill the tmux session for a slug — unless it's the popup's own session, in
+# which case record it as pending so the dashboard can switch+kill it AFTER fzf
+# exits and the popup closes. Sets `deferred=1` when it defers.
+PENDING="$TICKET_CACHE_DIR/.pending-kill"
+deferred=0
+kill_session() {
+  local s="$1"
+  tmux has-session -t "=$s" 2>/dev/null || return 1
+  if [ "$s" = "$(popup_session)" ]; then
+    printf '%s\n' "$s" > "$PENDING" 2>/dev/null || true
+    deferred=1
+    say "  closing session \033[1m$s\033[0m …"
+  else
+    tmux kill-session -t "=$s" 2>/dev/null
+    say "  killed session \033[1m$s\033[0m"
+  fi
+  return 0
+}
+
+# Remove a worktree WITHOUT blocking on the delete. A worktree's node_modules is
+# routinely 2GB+ / 200k+ files, so `git worktree remove` (which rm's it inline)
+# can take ~10s and freeze the popup. Instead: rename the working dir to a hidden
+# sibling — instant, same filesystem, and invisible to the dashboard's `*/*` glob
+# (which skips dot-names) — then prune git's metadata and delete the files in a
+# detached background job. The branch is untouched, so nothing is lost.
+remove_worktree() {
+  local main="$1" wt="$2" dest
+  dest="$(dirname "$wt")/.trash-$(basename "$wt").$$"
+  if mv "$wt" "$dest" 2>/dev/null; then
+    nohup sh -c "git -C '$main' worktree prune >/dev/null 2>&1; rm -rf '$dest' >/dev/null 2>&1" \
+      >/dev/null 2>&1 </dev/null &
+    disown 2>/dev/null || true
+    return 0
+  fi
+  # Fallback (e.g. rename across filesystems): synchronous forced removal.
+  git -C "$main" worktree remove --force "$wt" 2>/dev/null
+}
+
+slug="${1:-}"
+wt="${2-}"
+
+if [ -z "$slug" ]; then say "  usage: ticket-rm <slug> <worktree-path>"; pause; exit 1; fi
+
+# Markers emitted by the dashboard's OTHER SESSIONS section.
+case "$slug" in
+  __DIV__)
+    exit 0
+    ;;
+  __SESS__:*)
+    sess="${slug#__SESS__:}"
+    kill_session "$sess" || say "  no session named $sess"
+    [ "$deferred" = 1 ] || pause
+    exit 0
+    ;;
+esac
+
+# We remove the worktree (and answer any force-prompt) BEFORE killing the
+# session — see the header note. `git worktree remove` works fine while the
+# session's shells are still cd'd into it; the session is torn down last.
+
+# 1) Need a worktree path to proceed. With none, this is just a session kill.
+if [ -z "$wt" ]; then
+  kill_session "$slug"
+  say "  no worktree path provided"
+  [ "$deferred" = 1 ] || pause
+  exit 0
+fi
+
+common="$(git -C "$wt" rev-parse --git-common-dir 2>/dev/null)"
+if [ -z "$common" ]; then
+  say "  $wt is not a git worktree"
+  pause
+  exit 0
+fi
+main="$(cd "$(dirname "$common")" && pwd)"
+
+# 2) Clean working tree → remove right away. Dirty → show changes and confirm.
+#    (This check is what `git worktree remove` guards on, run explicitly so we
+#    can take the fast, non-blocking removal path in the common clean case.)
+status_out="$(git -C "$wt" status --porcelain 2>/dev/null)"
+if [ -z "$status_out" ]; then
+  remove_worktree "$main" "$wt"
+  say "  removed worktree \033[1m$slug\033[0m"
+  kill_session "$slug"
+  rm -f "$TICKET_CACHE_DIR/pr-$slug.txt"
+  exit 0    # no pause: dashboard reloads (or closes, if this was our session)
+fi
+
+# 3) Worktree has uncommitted/untracked work — show it and prompt to force.
+say ""
+say "  \033[33mWorktree has uncommitted changes:\033[0m"
+say ""
+printf '%s\n' "$status_out" | head -10 | sed 's/^/    /' >&2
+say ""
+ask "  Force-remove (\033[31mlose uncommitted changes\033[0m)? [y/N] "
+
+ans=""
+if [ -r /dev/tty ]; then
+  read -r ans </dev/tty 2>/dev/null || ans=""
+fi
+
+case "$ans" in
+  y|Y|yes|YES)
+    remove_worktree "$main" "$wt"
+    say "  force-removed \033[1m$slug\033[0m"
+    kill_session "$slug"
+    rm -f "$TICKET_CACHE_DIR/pr-$slug.txt"
+    exit 0    # no pause: dashboard reloads (or closes, if this was our session)
+    ;;
+  *)
+    say "  kept worktree + session (changes preserved, branch intact)"
+    ;;
+esac
+
+pause

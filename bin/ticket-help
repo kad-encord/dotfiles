@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Full key reference for the ticket dashboard. Shown in the preview pane when
+# the user presses `?`. Returns to the normal ticket preview on next nav key.
+
+C_RESET=$'\033[0m'
+C_DIM=$'\033[2m'
+C_BOLD=$'\033[1m'
+C_ACC=$'\033[38;5;141m'
+C_GRY=$'\033[38;5;245m'
+C_YEL=$'\033[38;5;179m'
+C_RED=$'\033[38;5;167m'
+
+s() { printf '\n  %s%s%s%s\n' "$C_GRY" "$C_BOLD" "$1" "$C_RESET"; }
+k() { printf '    %s%-12s%s%s\n' "$C_ACC" "$1" "$C_RESET" "$2"; }
+
+printf '\n  %s%sTICKET DASHBOARD%s\n' "$C_ACC" "$C_BOLD" "$C_RESET"
+
+s "STATUS"
+printf '    %s○%s  %s\n' "$C_DIM" "$C_RESET" "no tmux session"
+printf '    %s●%s  %s\n' "$C_ACC" "$C_RESET" "session live · claude is idle"
+printf '    %s◐%s  %s\n' "$C_YEL" "$C_RESET" "session live · claude is working"
+printf '    %s⚠%s  %s\n' "$C_RED" "$C_RESET" "session live · claude is waiting for you"
+
+s "NAVIGATE"
+k "j  k"        "down / up"
+k "g  G"        "first / last"
+k "^d  ^u"      "half-page down / up"
+k "/"           "toggle search mode  (letters type instead of acting)"
+
+s "OPEN"
+k "enter"       "switch to (or create) the session"
+k "o"           "Linear ticket in browser"
+k "p"           "GitHub PR in browser"
+k "e"           "worktree in \$EDITOR"
+
+s "ACTIONS"
+k "n"           "new ticket  (prompts for branch + repo)"
+k "N"           "new general session  (fe / be / lp / dotfiles / custom)"
+k "x"           "unticket  (remove worktree + kill session)"
+k "b"           "copy branch name"
+k "f"           "backfill Linear context"
+k "r"           "refresh PR badges"
+
+s "EXIT"
+k "q"           "close popup  (in nav mode)"
+k "esc"         "close popup"
+k "^c"          "close popup"
+
+printf '\n  %sPress j or k to return to the ticket preview.%s\n' "$C_DIM" "$C_RESET"

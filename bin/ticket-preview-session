@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# ticket-preview-session <session-name>
+# Renders the right-pane preview for a non-ticket tmux session.
+
+set -euo pipefail
+export LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+sess="${1:?usage: ticket-preview-session <session-name>}"
+
+C_RESET=$'\033[0m'
+C_DIM=$'\033[2m'
+C_BOLD=$'\033[1m'
+C_ACC=$'\033[38;5;141m'
+C_GRY=$'\033[38;5;245m'
+
+pad() { printf '%*s' "$1" ''; }
+
+section() {
+  printf '\n  %s%s%s%s\n\n' "$C_GRY" "$C_BOLD" "$1" "$C_RESET"
+}
+
+# Card header
+cwd="$(tmux display-message -p -t "$sess" '#{pane_current_path}' 2>/dev/null || echo '')"
+cwd="${cwd/#$HOME/\~}"
+[ -z "$cwd" ] && cwd="(unknown)"
+
+printf '\n'
+printf '  %s%s%s%s  %s●%s %sgeneral session%s\n' \
+  "$C_ACC" "$C_BOLD" "$sess" "$C_RESET" "$C_ACC" "$C_RESET" "$C_GRY" "$C_RESET"
+printf '\n'
+printf '  %scwd%s     %s\n' "$C_DIM" "$C_RESET" "$cwd"
+
+# Windows + the command running in the active pane of each
+section "WINDOWS"
+tmux list-windows -t "$sess" \
+  -F "  ${C_GRY}#{?window_active,▸ ,  }#I${C_RESET}  #W  ${C_DIM}(#{pane_current_command})${C_RESET}" 2>/dev/null \
+  | sed -e "s/\\\\033/$(printf '\033')/g"
+echo
+
+# If the session has a `claude` window, show a tail of it. Otherwise skip.
+if tmux list-windows -t "$sess" -F '#W' 2>/dev/null | grep -qx claude; then
+  section "CLAUDE PANE"
+  tmux capture-pane -t "${sess}:claude" -p -S -20 2>/dev/null | tail -n 20 | sed 's/^/  /'
+fi

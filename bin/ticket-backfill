@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# ticket-backfill [--all] [<slug>]
+#
+# Populates <worktree>/.git/worktrees/<slug>/ticket.json (and .ticket-context.md)
+# from Linear for an existing worktree — useful for worktrees created before the
+# Linear-fetch feature existed.
+#
+# Without args: backfills every worktree under $TICKET_WT_ROOT that doesn't have
+# a ticket.json yet. With <slug>: backfills just that one.
+
+set -euo pipefail
+
+# Ensure our own bin dir is on PATH so ticket-linear-fetch resolves when this
+# script is invoked from a tmux popup (whose PATH may not include dotfiles/bin).
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+case ":$PATH:" in
+  *":$SELF_DIR:"*) ;;
+  *) export PATH="$SELF_DIR:$PATH" ;;
+esac
+
+if [ -z "${LINEAR_API_KEY:-}" ] && [ -f "$HOME/.zshenv" ]; then
+  set -a; . "$HOME/.zshenv"; set +a
+fi
+
+: "${TICKET_WT_ROOT:=$HOME/worktrees}"
+: "${TICKET_PORT_BASE:=5000}"
+
+[ -n "${LINEAR_API_KEY:-}" ] || {
+  echo "ticket-backfill: LINEAR_API_KEY not set." >&2
+  echo "  Either add 'export LINEAR_API_KEY=...' to ~/.zshenv," >&2
+  echo "  or update the running tmux server:" >&2
+  echo "    tmux setenv -g LINEAR_API_KEY \$LINEAR_API_KEY" >&2
+  sleep 3
+  exit 1
+}
+
+backfill_one() {
+  local wt="$1"
+  local slug; slug="$(basename "$wt")"
+  local id; id="$(printf '%s' "$slug" | grep -oiE '[a-z]+-[0-9]+' | head -1)" || true
+  [ -n "$id" ] || { echo "skip $slug (no linear id pattern)"; return 0; }
+
+  local gd; gd="$(git -C "$wt" rev-parse --git-dir 2>/dev/null)" || { echo "skip $slug (not a git worktree)"; return 0; }
+  local branch; branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+  local repo;  repo="$(basename "$(dirname "$wt")")"
+  local num;   num="$(printf '%s' "$id" | grep -oE '[0-9]+')"
+  local port=$(( TICKET_PORT_BASE + (num % 1000) ))
+
+  local meta_json fetch_err
+  fetch_err="$(ticket-linear-fetch "$id" 2>&1 1>/dev/null)" || true
+  if ! meta_json="$(ticket-linear-fetch "$id" 2>/dev/null)"; then
+    echo "skip $slug — Linear fetch failed for $id: ${fetch_err:-unknown error}"
+    sleep 2
+    return 0
+  fi
+
+  printf '%s' "$meta_json" | jq \
+    --arg branch "$branch" --arg repo "$repo" --argjson port "$port" \
+    --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '. + {branch: $branch, repo: $repo, port: $port, created_at: $created}' \
+    > "$gd/ticket.json"
+
+  {
+    printf '# %s — %s\n\n' "$(printf '%s' "$meta_json" | jq -r '.identifier')" "$(printf '%s' "$meta_json" | jq -r '.title')"
+    printf '- **Branch:** `%s`\n'  "$branch"
+    printf '- **State:** %s\n'    "$(printf '%s' "$meta_json" | jq -r '.state')"
+    printf '- **URL:** %s\n'      "$(printf '%s' "$meta_json" | jq -r '.url')"
+    printf '- **Dev port:** %s\n\n' "$port"
+    printf '## Description\n\n%s\n' "$(printf '%s' "$meta_json" | jq -r '.description // "(no description)"')"
+  } > "$wt/.ticket-context.md"
+
+  local common; common="$(git -C "$wt" rev-parse --git-common-dir)"
+  if ! grep -qxF '/.ticket-context.md' "$common/info/exclude" 2>/dev/null; then
+    echo '/.ticket-context.md' >> "$common/info/exclude"
+  fi
+
+  # Stash on any live tmux session for this slug, too.
+  if tmux has-session -t "=$slug" 2>/dev/null; then
+    tmux set-option -t "$slug" -q "@ticket_title" "$(printf '%s' "$meta_json" | jq -r '.title')"
+    tmux set-option -t "$slug" -q "@ticket_url"   "$(printf '%s' "$meta_json" | jq -r '.url')"
+  fi
+
+  echo "ok   $slug — $(printf '%s' "$meta_json" | jq -r '.title')"
+}
+
+if [ "${1:-}" = "--all" ] || [ $# -eq 0 ]; then
+  shopt -s nullglob
+  for wt in "$TICKET_WT_ROOT"/*/*; do
+    [ -d "$wt" ] || continue
+    [ -e "$wt/.git" ] || continue
+    backfill_one "$wt"
+  done
+else
+  slug="$1"
+  found=""
+  for wt in "$TICKET_WT_ROOT"/*/"$slug"; do
+    [ -d "$wt" ] && found="$wt" && break
+  done
+  [ -n "$found" ] || { echo "ticket-backfill: no worktree found for slug '$slug'" >&2; exit 1; }
+  backfill_one "$found"
+fi

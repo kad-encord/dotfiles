@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# ticket-preview <worktree-path>
+# Right-pane renderer for the dashboard. Linear-inspired layout: card header,
+# uppercase section labels, dim full-width rules between sections.
+
+set -euo pipefail
+export LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+
+wt="${1:?usage: ticket-preview <worktree>}"
+
+# Palette — soft, dark-bg-friendly
+C_RESET=$'\033[0m'
+C_DIM=$'\033[2m'
+C_BOLD=$'\033[1m'
+C_ACC=$'\033[38;5;141m'    # Linear-ish purple
+C_GRN=$'\033[38;5;114m'
+C_RED=$'\033[38;5;167m'
+C_YEL=$'\033[38;5;179m'
+C_GRY=$'\033[38;5;245m'
+
+# fzf exports FZF_PREVIEW_COLUMNS for the preview command — prefer that, fall
+# back to tput, then a safe default.
+cols="${FZF_PREVIEW_COLUMNS:-$(tput cols 2>/dev/null || echo 80)}"
+pad_l=2
+inner=$(( cols - pad_l - 2 ))
+(( inner < 30 )) && inner=30
+
+# Truncate string $1 to $2 chars, appending … if it was longer
+ellipsize() {
+  local s="$1" w="$2"
+  if (( ${#s} > w )); then
+    printf '%s…' "${s:0:w-1}"
+  else
+    printf '%s' "$s"
+  fi
+}
+
+section() {
+  # UPPERCASE label in dim-bold, no underline rule (avoids wrapping in narrow
+  # preview panes). The blank lines around it provide the visual break.
+  printf '\n  %s%s%s%s\n\n' "${C_GRY}" "${C_BOLD}" "$1" "${C_RESET}"
+}
+
+state_color() {
+  case "$1" in
+    *Progress*|*Started*|*Doing*) printf '%s' "$C_YEL" ;;
+    *Done*|*Completed*|*Closed*)  printf '%s' "$C_GRN" ;;
+    *Backlog*|*Triage*|*Todo*)    printf '%s' "$C_GRY" ;;
+    *Canceled*|*Duplicate*)       printf '%s' "$C_DIM" ;;
+    *)                            printf '%s' "$C_ACC" ;;
+  esac
+}
+
+pad() { printf '%*s' "$1" ''; }
+
+gd="$(git -C "$wt" rev-parse --git-dir 2>/dev/null || true)"
+branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+
+# ── HEADER CARD ─────────────────────────────────────────────────────────────
+if [ -n "$gd" ] && [ -f "$gd/ticket.json" ]; then
+  ident="$(jq -r '.identifier // "—"' "$gd/ticket.json")"
+  title="$(jq -r '.title // "—"'      "$gd/ticket.json")"
+  state="$(jq -r '.state // "—"'      "$gd/ticket.json")"
+  port="$(jq -r  '.port  // "—"'      "$gd/ticket.json")"
+  url="$(jq -r   '.url   // ""'       "$gd/ticket.json")"
+  desc="$(jq -r  '.description // ""' "$gd/ticket.json")"
+
+  sc="$(state_color "$state")"
+
+  printf '\n'
+  printf '%s%s%s%s  %s●%s %s%s%s\n' \
+    "$(pad $pad_l)" "$C_ACC$C_BOLD" "$ident" "$C_RESET" \
+    "$sc" "$C_RESET" "$C_GRY" "$state" "$C_RESET"
+  printf '%s%s%s%s\n' \
+    "$(pad $pad_l)" "$C_BOLD" "$title" "$C_RESET"
+  printf '\n'
+  printf '%s%sbranch%s  %s\n' "$(pad $pad_l)" "$C_DIM" "$C_RESET" "$branch"
+  printf '%s%sport  %s  %s\n' "$(pad $pad_l)" "$C_DIM" "$C_RESET" "$port"
+  if [ -n "$url" ]; then
+    printf '%s%slink  %s  %s%s%s\n' "$(pad $pad_l)" "$C_DIM" "$C_RESET" \
+      "$C_GRY" "$(ellipsize "$url" $((inner - 8)))" "$C_RESET"
+  fi
+
+  if [ -n "$desc" ] && [ "$desc" != "(no description)" ]; then
+    section "DESCRIPTION"
+    printf '%s\n' "$desc" | fold -s -w "$inner" | sed "s/^/$(pad $pad_l)/"
+  fi
+else
+  # Fallback when no ticket.json has been backfilled yet
+  printf '\n'
+  printf '%s%s%s%s\n' "$(pad $pad_l)" "$C_BOLD" "$branch" "$C_RESET"
+  printf '%s%s%s%s\n' "$(pad $pad_l)" "$C_GRY" "$wt" "$C_RESET"
+  printf '\n'
+  printf '%s%sNo Linear context cached.%s\n' "$(pad $pad_l)" "$C_DIM" "$C_RESET"
+  printf '%s%sPress %s^f%s%s to backfill from Linear.%s\n' \
+    "$(pad $pad_l)" "$C_DIM" "$C_RESET" "$C_DIM" "$C_DIM" "$C_RESET"
+fi
+
+# ── COMMITS ─────────────────────────────────────────────────────────────────
+section "RECENT COMMITS"
+git -C "$wt" log -10 --abbrev=7 --pretty=format:"$(pad $pad_l)${C_GRY}%h${C_RESET}  %s" 2>/dev/null || true
+echo
+
+# ── CHANGES ─────────────────────────────────────────────────────────────────
+section "CHANGES"
+status_out="$(git -C "$wt" status --short 2>/dev/null || true)"
+if [ -z "$status_out" ]; then
+  printf '%s%s(working tree clean)%s\n' "$(pad $pad_l)" "$C_DIM" "$C_RESET"
+else
+  printf '%s\n' "$status_out" | head -20 | while IFS= read -r line; do
+    code="${line:0:2}"
+    file="${line:3}"
+    case "$code" in
+      ' M'|'M ') c="$C_YEL" ;;
+      '??')      c="$C_DIM" ;;
+      'A '|'AM') c="$C_GRN" ;;
+      ' D'|'D ') c="$C_RED" ;;
+      *)         c="$C_RESET" ;;
+    esac
+    printf '%s%s%s%s  %s\n' "$(pad $pad_l)" "$c" "$code" "$C_RESET" "$file"
+  done
+fi

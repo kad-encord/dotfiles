@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# ticket-new-session
+# Bound to Ctrl-G in the dashboard. Creates a non-ticket tmux session with the
+# same 3-window layout as ticket sessions (claude / nvim / cli).
+#
+# Pick a preset (fe / be / lp / dotfiles) or "custom" to enter a name + cwd.
+
+set -uo pipefail
+export LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+
+# Pull config defaults from ticket.sh (TICKET_FE_REPO, TICKET_BE_REPO, etc).
+# It's safe to source — the file only sets vars and defines functions.
+# shellcheck disable=SC1090
+[ -f "$HOME/dotfiles/ticket.sh" ] && . "$HOME/dotfiles/ticket.sh"
+
+say()   { printf '%b\n' "$*" >&2; }
+ask()   { printf '%s' "$1" >&2; }
+read_tty() {
+  if [ -r /dev/tty ]; then read -r "$1" </dev/tty; else eval "$1=''"; fi
+}
+
+C_RESET=$'\033[0m'
+C_DIM=$'\033[2m'
+C_BOLD=$'\033[1m'
+C_ACC=$'\033[38;5;141m'
+C_RED=$'\033[38;5;167m'
+
+# Resolve a command's first word to an absolute path so the tmux pane doesn't
+# depend on nvm/rc having loaded yet. (Same trick as ticket.sh.)
+_abs() {
+  local cmd="$1" first rest bin
+  [ -z "$cmd" ] && return 0
+  first="${cmd%% *}"
+  if [ "$first" = "$cmd" ]; then rest=""; else rest=" ${cmd#* }"; fi
+  bin="$(command -v "$first" 2>/dev/null)" || { printf '%s' "$cmd"; return 0; }
+  printf '%s%s' "$bin" "$rest"
+}
+
+clear
+say ""
+say "  ${C_ACC}${C_BOLD}NEW GENERAL SESSION${C_RESET}"
+say ""
+say "  ${C_DIM}Same 3-window layout as a ticket: claude · nvim · cli${C_RESET}"
+say ""
+say "    ${C_ACC}1${C_RESET}  fe        ${C_DIM}${TICKET_FE_REPO:-$HOME/Desktop/code/cord-frontend}${C_RESET}"
+say "    ${C_ACC}2${C_RESET}  be        ${C_DIM}${TICKET_BE_REPO:-$HOME/Desktop/code/cord-backend}${C_RESET}"
+say "    ${C_ACC}3${C_RESET}  lp        ${C_DIM}$HOME/Desktop/code/cord-landing-page${C_RESET}"
+say "    ${C_ACC}4${C_RESET}  dotfiles  ${C_DIM}$HOME/dotfiles${C_RESET}"
+say "    ${C_ACC}c${C_RESET}  custom    ${C_DIM}prompt for name + cwd${C_RESET}"
+say ""
+ask "  choose: "
+read_tty choice
+[ -z "$choice" ] && exit 0
+
+name=""; cwd=""
+case "$choice" in
+  1|fe)             name="fe";        cwd="${TICKET_FE_REPO:-$HOME/Desktop/code/cord-frontend}" ;;
+  2|be)             name="be";        cwd="${TICKET_BE_REPO:-$HOME/Desktop/code/cord-backend}" ;;
+  3|lp)             name="lp";        cwd="$HOME/Desktop/code/cord-landing-page" ;;
+  4|dot|dotfiles)   name="dotfiles";  cwd="$HOME/dotfiles" ;;
+  c|custom)
+    say ""
+    ask "  session name: "
+    read_tty name
+    [ -z "$name" ] && exit 0
+    say ""
+    ask "  cwd [\$HOME]: "
+    read_tty cwd
+    cwd="${cwd:-$HOME}"
+    cwd="${cwd/#\~/$HOME}"
+    ;;
+  *)
+    say "  (cancelled)"
+    sleep 0.5
+    exit 0
+    ;;
+esac
+
+if [ ! -d "$cwd" ]; then
+  say ""
+  say "  ${C_RED}$cwd does not exist${C_RESET}"
+  sleep 2
+  exit 1
+fi
+
+# Already exists?  Just switch.
+if tmux has-session -t "=$name" 2>/dev/null; then
+  say ""
+  say "  session ${C_BOLD}$name${C_RESET} already exists — switching"
+  sleep 0.5
+  if [ -n "${TMUX:-}" ]; then tmux switch-client -t "=$name"; else exec tmux attach -t "=$name"; fi
+  exit 0
+fi
+
+say ""
+say "  creating ${C_BOLD}$name${C_RESET} in ${C_DIM}$cwd${C_RESET} ..."
+
+agent_cmd="$(_abs "${TICKET_AGENT_CMD:-claude}")"
+editor_cmd="$(_abs "${TICKET_EDITOR_CMD:-nvim}")"
+
+# Window 1: claude (agent running in cwd)
+cw="$(tmux new-session -d -P -F '#{window_id} #{pane_id}' -s "$name" -c "$cwd" -n claude)"
+claude_win="${cw%% *}"; claude_pane="${cw##* }"
+[ -n "$agent_cmd" ] && tmux send-keys -t "$claude_pane" "$agent_cmd" C-m
+
+# Window 2: nvim
+cw="$(tmux new-window -P -F '#{window_id} #{pane_id}' -t "$name:" -n nvim -c "$cwd")"
+nvim_pane="${cw##* }"
+[ -n "$editor_cmd" ] && tmux send-keys -t "$nvim_pane" "$editor_cmd" C-m
+
+# Window 3: cli  (scratch left, scratch top-right, scratch bottom-right)
+cw="$(tmux new-window -P -F '#{window_id} #{pane_id}' -t "$name:" -n cli -c "$cwd")"
+left="${cw##* }"
+right_top="$(tmux split-window -h -P -F '#{pane_id}' -t "$left" -c "$cwd")"
+tmux split-window -v -P -F '#{pane_id}' -t "$right_top" -c "$cwd" >/dev/null
+tmux select-pane -t "$left"
+
+tmux select-window -t "$claude_win"
+
+if [ -n "${TMUX:-}" ]; then
+  tmux switch-client -t "=$name"
+else
+  exec tmux attach -t "=$name"
+fi

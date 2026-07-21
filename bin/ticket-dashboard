@@ -1,0 +1,409 @@
+#!/usr/bin/env bash
+# Floating ticket dashboard. Bound to tmux `prefix + T` via display-popup.
+#
+# Lists every worktree under $TICKET_WT_ROOT with rich status:
+#   ● live tmux session, ○ dormant   |   repo (fe/be/…)   |   slug
+#   ✓:port / ✗:port dev server       |   git ahead/behind/dirty
+#   PR badge (from ticket-pr-badge)  |   Linear title
+#
+# Keys inside fzf:
+#   Enter   switch to (or create) session for the worktree
+#   Ctrl-O  open the Linear URL
+#   Ctrl-X  unticket: kill session + remove worktree
+#   Ctrl-R  force-refresh PR badges
+#   Esc     close popup
+
+set -euo pipefail
+
+# UTF-8 locale: ${#var} and ${var:0:n} need this to count characters (not bytes).
+# Force unconditionally — if the user's shell exports LC_ALL=C (or similar),
+# the conditional ":-" form wouldn't kick in and padding for ● / ✓ / ↑ would
+# overshoot by the byte-vs-char drift, pushing STATUS rightward into REPO.
+export LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+
+# Pick up env (LINEAR_API_KEY, etc) from ~/.zshenv when the tmux server's
+# inherited env doesn't have it. Safe: .zshenv should only contain `export` lines.
+if [ -z "${LINEAR_API_KEY:-}" ] && [ -f "$HOME/.zshenv" ]; then
+  set -a; . "$HOME/.zshenv"; set +a
+fi
+
+: "${TICKET_WT_ROOT:=$HOME/worktrees}"
+: "${TICKET_CACHE_DIR:=$HOME/.cache/ticket}"
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+mkdir -p "$TICKET_CACHE_DIR" 2>/dev/null || true
+
+# Last-rendered rows. The popup paints this instantly on launch, then fzf's
+# `start` event kicks off a fresh (re)build in the background and swaps it in —
+# so opening feels instant even though a full build takes ~0.4s.
+CACHE_ROWS="$TICKET_CACHE_DIR/rows.txt"
+
+mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
+
+repo_label() {
+  case "$1" in
+    cord-frontend)     echo "fe" ;;
+    cord-backend)      echo "be" ;;
+    cord-landing-page) echo "lp" ;;
+    *)                 printf '%.4s' "$1" ;;
+  esac
+}
+
+dev_status() {
+  local port="$1"
+  if [ -z "$port" ] || [ "$port" = "null" ]; then printf '  —   '; return; fi
+  if nc -z -G 1 -w 1 127.0.0.1 "$port" 2>/dev/null; then
+    printf '✓ %s' "$port"
+  else
+    printf '✗ %s' "$port"
+  fi
+}
+
+git_short() {
+  local wt="$1" out=""
+  if git -C "$wt" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+    local ab behind ahead
+    ab="$(git -C "$wt" rev-list --left-right --count '@{u}...HEAD' 2>/dev/null || echo "0	0")"
+    behind="$(printf '%s' "$ab" | cut -f1)"
+    ahead="$(printf '%s'  "$ab" | cut -f2)"
+    [ "$ahead"  != "0" ] && out+="↑$ahead"
+    [ "$behind" != "0" ] && out+=" ↓$behind"
+  fi
+  [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ] && out+=" *"
+  [ -z "$out" ] && out="clean"
+  printf '%s' "$out"
+}
+
+pr_badge_or_stale() {
+  local slug="$1" wt="$2" cache="$TICKET_CACHE_DIR/pr-$1.txt"
+  if [ ! -f "$cache" ] || [ $(( $(date +%s) - $(mtime "$cache") )) -ge 60 ]; then
+    ( "$SELF_DIR/ticket-pr-badge" --refresh "$slug" >/dev/null 2>&1 & ) >/dev/null 2>&1
+  fi
+  if [ -f "$cache" ] && [ -s "$cache" ]; then cat "$cache"; else printf '—'; fi
+}
+
+# ANSI palette — restrained, Linear-inspired
+C_RESET=$'\033[0m'
+C_DIM=$'\033[2m'
+C_BOLD=$'\033[1m'
+C_ACC=$'\033[38;5;141m'   # accent purple (Linear-ish)
+C_GRN=$'\033[38;5;114m'
+C_RED=$'\033[38;5;167m'
+C_YEL=$'\033[38;5;179m'
+C_MAG=$'\033[38;5;176m'
+C_CYA=$'\033[38;5;110m'
+C_GRY=$'\033[38;5;245m'
+
+# Pad rows and the divider to a generous fixed width so fzf can truncate them
+# to whatever the actual pane is — this avoids fragile `tput cols` calls inside
+# popups/reload subprocesses (which sometimes return the wrong pty width and
+# leave the divider ending half-way across the row).
+ROW_WIDTH=200
+
+# Char-aware truncate + right-pad. Uses bash's UTF-8-aware ${#var} and ${var:0:n}.
+pad_field() {
+  local s="$1" w="$2" len
+  len=${#s}
+  if (( len >= w )); then
+    printf '%s' "${s:0:w}"
+  else
+    printf '%s%*s' "$s" $((w - len)) ''
+  fi
+}
+
+# Column widths (single-space gaps between columns).
+W_STATUS=6
+W_REPO=4
+W_TICKET=8
+W_DEV=7
+W_GIT=6
+W_PR=10
+FIXED_W=$(( W_STATUS + W_REPO + W_TICKET + W_DEV + W_GIT + W_PR + 6 ))   # = 47
+TITLE_W=$(( ROW_WIDTH - FIXED_W ))
+
+# Dim divider row, e.g.  "── OTHER SESSIONS ─────────────────────"
+# Hidden col 1 = "__DIV__" so the Enter handler can skip it.
+emit_divider() {
+  local label="$1"
+  local prefix="── ${label} "
+  local dashes_n=$(( ROW_WIDTH - ${#prefix} ))
+  (( dashes_n < 0 )) && dashes_n=0
+  local dashes
+  dashes="$(printf '%*s' "$dashes_n" '' | tr ' ' '─')"
+  printf '__DIV__\t\t\t%s%s%s%s\n' "$C_DIM" "$prefix" "$dashes" "$C_RESET"
+}
+
+# Row for a tmux session that isn't tied to a worktree (e.g. a long-running
+# "fe" or "be" session for general work). Hidden col 1 carries an "__SESS__:"
+# marker so the Enter / Ctrl-X handlers know it's not a ticket worktree.
+emit_other_row() {
+  local sess="$1"
+  local cwd cstate sess_sym sess_color sess_p sess_c
+  local lbl_p slug_p dev_p gst_p pr_p title_p
+
+  cwd="$(tmux display-message -p -t "$sess" '#{pane_current_path}' 2>/dev/null || echo '')"
+  cwd="${cwd/#$HOME/\~}"
+  [ -z "$cwd" ] && cwd="(no path)"
+
+  cstate="$("$SELF_DIR/ticket-claude-state" "$sess" 2>/dev/null || echo idle)"
+  case "$cstate" in
+    working) sess_sym="◐"; sess_color="$C_YEL" ;;
+    waiting) sess_sym="⚠"; sess_color="$C_RED" ;;
+    *)       sess_sym="●"; sess_color="$C_ACC" ;;
+  esac
+  sess_p="$(pad_field "$sess_sym" "$W_STATUS")"
+  sess_c="${sess_color}${sess_p}${C_RESET}"
+
+  lbl_p="${C_DIM}$(pad_field "—" "$W_REPO")${C_RESET}"
+  slug_p="$(pad_field "$sess" "$W_TICKET")"
+  dev_p="${C_DIM}$(pad_field "—" "$W_DEV")${C_RESET}"
+  gst_p="${C_DIM}$(pad_field "—" "$W_GIT")${C_RESET}"
+  pr_p="${C_DIM}$(pad_field "—" "$W_PR")${C_RESET}"
+  title_p="${C_DIM}$(pad_field "$cwd" "$TITLE_W")${C_RESET}"
+
+  printf '__SESS__:%s\t\t\t%s %s %s %s %s %s %s\n' \
+    "$sess" "$sess_c" "$lbl_p" "$slug_p" "$dev_p" "$gst_p" "$pr_p" "$title_p"
+}
+
+# Build a single worktree's dashboard row (tab-delimited) and print it.
+# Self-contained so build_rows can run many of these in parallel subshells —
+# it reads only script globals (widths/colors/helpers) plus its $1.
+#
+# Status glyph combines tmux session liveness with claude pane activity:
+#   ○ dim       no tmux session for this slug
+#   ● accent    session live, claude idle (waiting at the input prompt)
+#   ◐ amber     session live, claude is running a tool / streaming
+#   ⚠ red       session live, claude is waiting for the user to respond
+emit_worktree_row() {
+  local wt="$1"
+  local repo lbl slug gitdir title port url dev gst pr
+  local sess_p sess_c lbl_p slug_p dev_p dev_c gst_p gst_c pr_p pr_c title_p
+  local title_w="$TITLE_W"
+  local cstate sess_sym sess_color
+
+  repo="$(basename "$(dirname "$wt")")"
+  slug="$(basename "$wt")"
+  lbl="$(repo_label "$repo")"
+  gitdir="$(git -C "$wt" rev-parse --git-dir 2>/dev/null || true)"
+  title="—"; port=""; url=""
+  if [ -n "$gitdir" ] && [ -f "$gitdir/ticket.json" ]; then
+    title="$(jq -r '.title // "—"' "$gitdir/ticket.json" 2>/dev/null || echo "—")"
+    port="$(jq -r  '.port  // empty' "$gitdir/ticket.json" 2>/dev/null || true)"
+    url="$(jq -r   '.url   // empty' "$gitdir/ticket.json" 2>/dev/null || true)"
+  fi
+
+  cstate="$("$SELF_DIR/ticket-claude-state" "$slug" 2>/dev/null || echo none)"
+  case "$cstate" in
+    working) sess_sym="◐"; sess_color="$C_YEL" ;;
+    waiting) sess_sym="⚠"; sess_color="$C_RED" ;;
+    idle)    sess_sym="●"; sess_color="$C_ACC" ;;
+    *)       sess_sym="○"; sess_color="$C_DIM" ;;
+  esac
+  sess_p="$(pad_field "$sess_sym" "$W_STATUS")"
+  sess_c="${sess_color}${sess_p}${C_RESET}"
+
+  lbl_p="$(pad_field "$lbl"  "$W_REPO")"
+  slug_p="$(pad_field "$slug" "$W_TICKET")"
+
+  dev="$(dev_status "$port")"
+  dev_p="$(pad_field "$dev" "$W_DEV")"
+  case "$dev" in
+    "✓ "*) dev_c="${C_GRN}${dev_p}${C_RESET}" ;;
+    "✗ "*) dev_c="${C_RED}${dev_p}${C_RESET}" ;;
+    *)     dev_c="${C_DIM}${dev_p}${C_RESET}" ;;
+  esac
+
+  gst="$(git_short "$wt")"
+  gst_p="$(pad_field "$gst" "$W_GIT")"
+  if [ "$gst" = "clean" ]; then
+    gst_c="${C_DIM}${gst_p}${C_RESET}"
+  else
+    gst_c="${C_YEL}${gst_p}${C_RESET}"
+  fi
+
+  pr="$(pr_badge_or_stale "$slug" "$wt")"
+  pr_p="$(pad_field "$pr" "$W_PR")"
+  case "$pr" in
+    *✓*)  pr_c="${C_GRN}${pr_p}${C_RESET}" ;;
+    *✗*)  pr_c="${C_RED}${pr_p}${C_RESET}" ;;
+    *…*)  pr_c="${C_YEL}${pr_p}${C_RESET}" ;;
+    ◆*)   pr_c="${C_CYA}${pr_p}${C_RESET}" ;;
+    *)    pr_c="${C_DIM}${pr_p}${C_RESET}" ;;
+  esac
+
+  title_p="$(pad_field "$title" "$title_w")"
+
+  # Hidden cols 1:slug  2:wt  3:url   |   Visible from col 4 onwards (1-space gaps)
+  printf '%s\t%s\t%s\t%s %s %s %s %s %s %s\n' \
+    "$slug" "$wt" "${url:--}" \
+    "$sess_c" "$lbl_p" "$slug_p" "$dev_c" "$gst_c" "$pr_c" "$title_p"
+}
+
+build_rows() {
+  local wt slug tmpd i=0
+  shopt -s nullglob
+
+  # Each row costs ~0.2-0.3s of serial subprocess work (git status, claude-state,
+  # jq, nc). Fan the worktrees out into parallel subshells writing to numbered
+  # temp files, then splice them back in order — turns O(rows) into ~O(1).
+  tmpd="$(mktemp -d "${TMPDIR:-/tmp}/ticket-rows.XXXXXX" 2>/dev/null || true)"
+
+  for wt in "$TICKET_WT_ROOT"/*/*; do
+    [ -d "$wt" ] || continue
+    [ -e "$wt/.git" ] || continue
+    slug="$(basename "$wt")"
+    KNOWN_SLUGS="$KNOWN_SLUGS $slug "
+    if [ -n "$tmpd" ]; then
+      i=$((i + 1))
+      emit_worktree_row "$wt" > "$tmpd/$(printf '%04d' "$i")" &
+    else
+      emit_worktree_row "$wt"          # no tmpdir: fall back to serial
+    fi
+  done
+
+  if [ -n "$tmpd" ]; then
+    wait
+    cat "$tmpd"/* 2>/dev/null
+    rm -rf "$tmpd"
+  fi
+
+  # OTHER section: any live tmux session whose name doesn't match a worktree
+  # slug. Useful for the long-running "fe" / "be" general-work sessions.
+  local other_sessions=() s
+  while IFS= read -r s; do
+    [ -z "$s" ] && continue
+    case "$KNOWN_SLUGS" in *" $s "*) continue ;; esac
+    other_sessions+=("$s")
+  done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
+
+  if [ "${#other_sessions[@]}" -gt 0 ]; then
+    emit_divider "OTHER SESSIONS"
+    for s in "${other_sessions[@]}"; do
+      emit_other_row "$s"
+    done
+  fi
+}
+
+# Tracks which slugs build_rows has emitted (space-delimited for bash 3.2
+# compatibility — `declare -A` isn't available in the system bash on macOS).
+KNOWN_SLUGS=" "
+
+# --list: build fresh, print, and refresh the instant-launch cache. This is
+# what fzf's `start`/`reload` bindings call, so every open freshens the cache.
+if [ "${1:-}" = "--list" ]; then
+  rows="$(build_rows)"
+  [ -n "$rows" ] && printf '%s\n' "$rows"
+  if [ -n "$rows" ]; then
+    tmpc="$(mktemp "${TMPDIR:-/tmp}/ticket-rows.XXXXXX" 2>/dev/null || true)"
+    [ -n "$tmpc" ] && printf '%s\n' "$rows" > "$tmpc" && mv -f "$tmpc" "$CACHE_ROWS"
+  fi
+  exit 0
+fi
+
+# Interactive launch: paint the cached rows immediately (instant), falling back
+# to a synchronous build only on a cold start with no cache yet. Either way the
+# `start:reload` binding below rebuilds in the background and swaps in fresh data.
+rows=""
+[ -s "$CACHE_ROWS" ] && rows="$(cat "$CACHE_ROWS")"
+if [ -z "$rows" ]; then
+  rows="$(build_rows)"
+  [ -n "$rows" ] && printf '%s\n' "$rows" > "$CACHE_ROWS" 2>/dev/null || true
+fi
+if [ -z "$rows" ]; then
+  echo "No worktrees under $TICKET_WT_ROOT."
+  echo "Create one with:  ticket --fe kad/eng-123-foo"
+  read -r -p "Press Enter to close..." _
+  exit 0
+fi
+
+# Header sits directly above the rows (--layout=reverse, no --header-first).
+# With --pointer='' set on fzf below, rows have no leading pointer column, so
+# the header starts at col 0 too — STATUS lines up directly above the ● dot.
+# Both the column header and the divider are padded to ROW_WIDTH so fzf
+# truncates them to the same visible width as the rows.
+hr=$(printf '%*s' "$ROW_WIDTH" '' | tr ' ' '─')
+
+cols_row="${C_GRY}${C_BOLD}$(printf '%-6s %-4s %-8s %-7s %-6s %-10s %s' "STATUS" "REPO" "TICKET" "DEV" "GIT" "PR" "TITLE")${C_RESET}"
+rule_row="${C_DIM}${hr}${C_RESET}"
+
+header="$(printf '\n%s\n%s' "$cols_row" "$rule_row")"
+
+# ticket-rm records a "kill my own session" request here (it can't do it while
+# this modal popup is open); we carry it out below once fzf has exited. Clear
+# any stale marker so a crashed prior run can't make us abort on launch.
+PENDING="$TICKET_CACHE_DIR/.pending-kill"
+rm -f "$PENDING" 2>/dev/null || true
+
+selected="$(printf '%s\n' "$rows" | fzf \
+  --ansi \
+  --layout=reverse \
+  --header="$header" \
+  --no-info \
+  --pointer='' \
+  --marker='' \
+  --delimiter=$'\t' \
+  --with-nth=4.. \
+  --prompt='  ' \
+  --no-sort \
+  --disabled \
+  --bind 'j:down' \
+  --bind 'k:up' \
+  --bind 'g:first' \
+  --bind 'G:last' \
+  --bind 'ctrl-d:half-page-down' \
+  --bind 'ctrl-u:half-page-up' \
+  --bind 'change:transform:[ "$FZF_PROMPT" = "/ " ] && echo "" || echo "clear-query"' \
+  --bind '/:transform:[ "$FZF_PROMPT" = "/ " ] && echo "disable-search+clear-query+change-prompt(  )+rebind(j,k,g,G,q,n,N,o,x,p,e,b,f,r)" || echo "enable-search+clear-query+change-prompt(/ )+unbind(j,k,g,G,q,n,N,o,x,p,e,b,f,r)"' \
+  --bind 'q:abort' \
+  --bind "start:reload(${SELF_DIR}/ticket-dashboard --list)" \
+  --bind "?:preview(${SELF_DIR}/ticket-help)" \
+  --bind "n:execute(${SELF_DIR}/ticket-new)+abort" \
+  --bind "N:execute(${SELF_DIR}/ticket-new-session)+abort" \
+  --bind "o:execute-silent(${SELF_DIR}/ticket-open-linear '{3}')" \
+  --bind "x:execute(${SELF_DIR}/ticket-rm '{1}' '{2}')+transform([ -f '${TICKET_CACHE_DIR}/.pending-kill' ] && echo abort || echo 'reload(${SELF_DIR}/ticket-dashboard --list)')" \
+  --bind "p:execute-silent([ -n '{2}' ] && cd '{2}' && gh pr view --web 2>/dev/null || true)" \
+  --bind "e:execute([ -n '{2}' ] && \$EDITOR '{2}' || true)" \
+  --bind "b:execute-silent([ -n '{2}' ] && git -C '{2}' rev-parse --abbrev-ref HEAD | tr -d '\\n' | pbcopy || true)" \
+  --bind "f:execute(case '{1}' in __DIV__|__SESS__:*) true ;; *) ${SELF_DIR}/ticket-backfill '{1}' ;; esac)+reload(${SELF_DIR}/ticket-dashboard --list)" \
+  --bind "r:execute-silent(rm -f ${TICKET_CACHE_DIR}/pr-*.txt)+reload(${SELF_DIR}/ticket-dashboard --list)" \
+  --preview-window='right:50%:wrap:border-left' \
+  --preview "${SELF_DIR}/ticket-preview-row '{1}' '{2}'" \
+  || true)"
+
+# Deferred kill of the popup's OWN session (recorded by ticket-rm via `x`). fzf
+# has exited but the popup command is still running — moving the client off the
+# session now works. The actual kill runs server-side (run-shell -b) a beat
+# later, after this process exits and the popup closes, so it can't detach us
+# mid-teardown or race the client switch.
+if [ -f "$PENDING" ]; then
+  pend="$(cat "$PENDING" 2>/dev/null)"
+  rm -f "$PENDING"
+  if [ -n "$pend" ] && tmux has-session -t "=$pend" 2>/dev/null; then
+    tmux switch-client -n 2>/dev/null || true
+    tmux run-shell -b "sleep 0.3; tmux kill-session -t '=$pend' 2>/dev/null" 2>/dev/null || true
+  fi
+  exit 0
+fi
+
+[ -z "$selected" ] && exit 0
+slug="$(printf '%s' "$selected" | cut -f1)"
+wt="$(  printf '%s' "$selected" | cut -f2)"
+
+case "$slug" in
+  __DIV__)
+    # Divider line in the OTHER SESSIONS section — ignore Enter.
+    exit 0
+    ;;
+  __SESS__:*)
+    # Non-ticket tmux session — just switch to it.
+    sess="${slug#__SESS__:}"
+    if [ -n "$TMUX" ]; then tmux switch-client -t "=$sess"; else tmux attach -t "=$sess"; fi
+    exit 0
+    ;;
+esac
+
+if tmux has-session -t "=$slug" 2>/dev/null; then
+  tmux switch-client -t "=$slug"
+else
+  tmux new-session -d -s "$slug" -c "$wt" -n claude
+  tmux switch-client -t "=$slug"
+fi

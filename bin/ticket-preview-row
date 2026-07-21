@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# ticket-preview-row <slug-or-marker> <worktree-path>
+# Single dispatcher for the dashboard's preview pane — routes ticket rows,
+# non-ticket session rows, and divider rows to the right renderer.
+
+set -euo pipefail
+slug="${1:-}"
+wt="${2:-}"
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+case "$slug" in
+  __DIV__)
+    printf '\n  \033[2m(section divider)\033[0m\n'
+    ;;
+  __SESS__:*)
+    "$SELF_DIR/ticket-preview-session" "${slug#__SESS__:}"
+    ;;
+  *)
+    "$SELF_DIR/ticket-preview" "$wt"
+    ;;
+esac
